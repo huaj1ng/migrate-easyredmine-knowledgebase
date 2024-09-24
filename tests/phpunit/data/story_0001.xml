@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<easy_knowledge_story>
+    <id>12</id>
+    <name>Lorem</name>
+    <author_id>17</author_id>
+    <entity_type/>
+    <entity_id/>
+    <storyviews>101</storyviews>
+    <created_on>2020-11-07 17:45:00 UTC</created_on>
+    <updated_on>2021-02-18 16:30:15 UTC</updated_on>
+    <description>
+<h2><strong>Lorem</strong></h2><p>ipsum</p><ul>
+<li>dolor</li>
+<li>sit</li>
+<li>amet <strong>lorem</strong></li>
+</ul><p>attachment:"Image20210621111610_1.png" attachment:"Image20210621111610_2.png"</p><p> </p><p><strong>Lorem</strong></p><p><a href="https://someserver.easyredmine.com/easy_knowledge_stories/56">dolor</a></p><p> </p>    </description>
+    <version>3</version>
+    <tag_list>
+dolor, lorem    </tag_list>
+</easy_knowledge_story>
+<category>
+    <id>12</id>
+    <name>Sit</name>
+    <entity_type/>
+    <entity_id/>
+    <parent_id>145</parent_id>
+    <lft>7240</lft>
+    <rgt>7241</rgt>
+    <created_on>2021-06-21 11:14:25 UTC</created_on>
+    <updated_on>2021-06-21 11:14:25 UTC</updated_on>
+    <description></description>
+</category>
+<author>
+    <id>17</id>
+    <first_name>Jane</first_name>
+    <last_name>Doe</last_name>
+    <email>jane.doe@company.com</email>
+</author>
+<attachment>
+    <id>234</id>
+    <container_id>1</container_id>
+    <container_type>EasyKnowledgeStory</container_type>
+    <filename>Image20210621111610_2.png</filename>
+    <disk_filename>210621111600_Image20210621111610_2.png</disk_filename>
+    <filesize>38563</filesize>
+    <content_type>image/png</content_type>
+    <digest>f47c9a577c15f3c2afbb7451443bcd8f7621721d6ac2938a6d7998cbbae49d82</digest>
+    <downloads>15</downloads>
+    <author_id>17</author_id>
+    <created_on>2021-06-21 11:16:00 UTC</created_on>
+    <description>*</description>
+    <disk_directory>2021/06</disk_directory>
+    <version>1</version>
+    <category/>
+    <easy_external_id/>
+    <project_id/>
+    <easy_helpdesk_author_id/>
+    <is_private>false</is_private>
+    <file_path>attachments/210621111600_Image20210621111610_2.png</file_path>
+</attachment>
+<attachment>
+    <id>456</id>
+    <container_id>1</container_id>
+    <container_type>EasyKnowledgeStory</container_type>
+    <filename>Image20210621111610_1.png</filename>
+    <disk_filename>210621111600_Image20210621111610_1.png</disk_filename>
+    <filesize>234654</filesize>
+    <content_type>image/png</content_type>
+    <digest>d69e1c738aa92fe829cf64353487342983da60e36ebfeef90d26se079adf3a3f</digest>
+    <downloads>41</downloads>
+    <author_id>17</author_id>
+    <created_on>2021-06-21 11:16:10 UTC</created_on>
+    <description>*</description>
+    <disk_directory>2021/06</disk_directory>
+    <version>1</version>
+    <category/>
+    <easy_external_id/>
+    <project_id/>
+    <easy_helpdesk_author_id/>
+    <is_private>false</is_private>
+    <file_path>attachments/210621111600_Image20210621111610_1.png</file_path>
+</attachment>
