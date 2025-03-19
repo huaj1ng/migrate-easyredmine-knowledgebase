@@ -12,6 +12,10 @@
 		{
 			"name": "Robert Vogel",
 			"email": "vogel@hallowelt.com"
+		},
+		{
+			"name": "Hua Jing",
+			"email": "hua.jing@hallowelt.com"
 		}
 	],
 	"repositories": [{
@@ -60,7 +64,8 @@
 	},
 	"config": {
 		"allow-plugins": {
-			"dealerdirect/phpcodesniffer-composer-installer": true
+			"dealerdirect/phpcodesniffer-composer-installer": true,
+			"composer/installers": true
 		}
 	}
 }

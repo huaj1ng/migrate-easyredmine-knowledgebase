@@ -2,83 +2,39 @@
 
 namespace HalloWelt\MigrateEasyRedmineKnowledgebase\Analyzer;
 
-use DOMDocument;
-use HalloWelt\MediaWiki\Lib\Migration\AnalyzerBase;
+use HalloWelt\MediaWiki\Lib\Migration\Analyzer\SqlBase;
 use HalloWelt\MediaWiki\Lib\Migration\DataBuckets;
+use HalloWelt\MediaWiki\Lib\Migration\IAnalyzer;
 use HalloWelt\MediaWiki\Lib\Migration\IOutputAwareInterface;
+use HalloWelt\MediaWiki\Lib\Migration\SqlConnection;
+use HalloWelt\MediaWiki\Lib\Migration\TitleBuilder;
 use HalloWelt\MediaWiki\Lib\Migration\Workspace;
-use HalloWelt\MigrateEasyRedmineKnowledgebase\Utility\XMLHelper;
-use Psr\Log\LoggerAwareInterface;
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
+use HalloWelt\MigrateEasyRedmineKnowledgebase\ISourcePathAwareInterface;
 use SplFileInfo;
 use Symfony\Component\Console\Input\Input;
 use Symfony\Component\Console\Output\Output;
 
-class EasyRedmineKnowledgebaseAnalyzer extends AnalyzerBase implements LoggerAwareInterface, IOutputAwareInterface {
+class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOutputAwareInterface, ISourcePathAwareInterface {
 
-	/**
-	 *
-	 * @var DOMDocument
-	 */
-	private $dom = null;
+	/** @var DataBuckets */
+	private $dataBuckets = null;
 
-	/**
-	 * @var DataBuckets
-	 */
-	private $customBuckets = null;
-
-	/**
-	 * @var XMLHelper
-	 */
-	private $helper = null;
-
-	/**
-	 * @var LoggerInterface
-	 */
-	private $logger = null;
-
-	/**
-	 * @var Input
-	 */
+	/** @var Input */
 	private $input = null;
 
-	/**
-	 * @var Output
-	 */
+	/** @var Output */
 	private $output = null;
 
-	/**
-	 *
-	 * @var array
-	 */
-	private $addedAttachmentIds = [];
+	/** @var string */
+	private $src = '';
 
-	/**
-	 *
-	 * @var string
-	 */
-	private $pageEasyRedmineKnowledgebaseTitle = '';
+	/** @var array */
+	private $userNames = [];
 
-	/**
-	 * @var string
-	 */
-	private $mainpage = 'Main Page';
+	/** @var int */
+	private $maintenanceUserID = 1;
 
-	/**
-	 * @var bool
-	 */
-	private $extNsFileRepoCompat = false;
-
-	/**
-	 * @var array
-	 */
-	private $advancedConfig = [];
-
-	/**
-	 * @var bool
-	 */
-	private $hasAdvancedConfig = false;
+	private const INT_MAX = 2147483647;
 
 	/**
 	 *
@@ -88,34 +44,22 @@ class EasyRedmineKnowledgebaseAnalyzer extends AnalyzerBase implements LoggerAwa
 	 */
 	public function __construct( $config, Workspace $workspace, DataBuckets $buckets ) {
 		parent::__construct( $config, $workspace, $buckets );
-		$this->customBuckets = new DataBuckets( [
-			'pages-titles-map',
-			'pages-ids-to-titles-map',
-			'body-contents-to-pages-map',
-			'title-invalids',
-			'filenames-to-filetitles-map',
-			'attachment-file-extensions',
-			'missing-attachment-id-to-filename',
-			'userkey-to-username-map',
-			'users',
-			'title-files',
-			'additional-files',
-			'attachment-orig-filename-target-filename-map',
-			'title-attachments'
+		$this->dataBuckets = new DataBuckets( [
+			'wiki-pages',
+			//'page-revisions',
+			//'attachment-files',
 		] );
-		$this->logger = new NullLogger();
-
-		if ( isset( $this->config['config'] ) ) {
-			$this->advancedConfig = $this->config['config'];
-			$this->hasAdvancedConfig = true;
-		}
 	}
 
 	/**
-	 * @param LoggerInterface $logger
+	 *
+	 * @param array $config
+	 * @param Workspace $workspace
+	 * @param DataBuckets $buckets
+	 * @return EasyRedmineKnowledgebaseAnalyzer
 	 */
-	public function setLogger( LoggerInterface $logger ): void {
-		$this->logger = $logger;
+	public static function factory( $config, Workspace $workspace, DataBuckets $buckets ): EasyRedmineKnowledgebaseAnalyzer {
+		return new static( $config, $workspace, $buckets );
 	}
 
 	/**
@@ -133,15 +77,39 @@ class EasyRedmineKnowledgebaseAnalyzer extends AnalyzerBase implements LoggerAwa
 	}
 
 	/**
+	 * @param string $path
+	 * @return void
+	 */
+	public function setSourcePath( $path ) {
+		$this->src = $path;
+	}
+
+	/**
+	 * @param SqlConnection $connection
+	 * @return void
+	 */
+	protected function setNames( $connection ) {
+		$res = $connection->query(
+			"SELECT id, login, firstname, lastname FROM users;"
+		);
+		foreach ( $res as $row ) {
+			$fullName = trim( $row['firstname'] . ' ' . $row['lastname'] );
+			$this->userNames[$row['id']] = $row['login']
+				? $row['login']
+				: ( strlen( $fullName ) > 0 ? $fullName : 'User ' . $row['id'] );
+		}
+	}
+
+	/**
 	 *
 	 * @param SplFileInfo $file
 	 * @return bool
 	 */
 	public function analyze( SplFileInfo $file ): bool {
-		$this->customBuckets->loadFromWorkspace( $this->workspace );
+		$this->dataBuckets->loadFromWorkspace( $this->workspace );
 		$result = parent::analyze( $file );
 
-		$this->customBuckets->saveToWorkspace( $this->workspace );
+		$this->dataBuckets->saveToWorkspace( $this->workspace );
 		return $result;
 	}
 
@@ -151,6 +119,82 @@ class EasyRedmineKnowledgebaseAnalyzer extends AnalyzerBase implements LoggerAwa
 	 * @return bool
 	 */
 	protected function doAnalyze( SplFileInfo $file ): bool {
+		if ( $file->getFilename() !== 'connection.json' ) {
+			print_r( "Please use a connection.json!" );
+			return true;
+		}
+		$filepath = str_replace( $file->getFilename(), '', $file->getPathname() );
+		// not finished here
+		$connection = new SqlConnection( $file );
+		// need to use abstract table name to support names with prefix
+		$this->setNames( $connection );
+		// wiki names not sufficiently used
+		$this->analyzePages( $connection );
+		//$this->analyzeRevisions( $connection );
+		//$this->analyzeRedirects( $connection );
+		//$this->analyzeAttachments( $connection );
+		$this->doStatistics( $connection );
+		// add symphony console output
+
+		return true;
+	}
+
+	/**
+	 * Analyze existing wiki pages and generate info wiki-pages array
+	 *
+	 * @param SqlConnection $connection
+	 */
+	protected function analyzePages( $connection ) {
+		$res = $connection->query(
+			"SELECT id AS page_id, name AS title, author_id, "
+			. "storyviews, created_on, updated_on, version "
+			. "FROM easy_knowledge_stories;"
+		);
+		$rows = [];
+		foreach ( $res as $row ) {
+			$rows[$row['page_id']] = $row;
+			unset( $rows[$row['page_id']]['page_id'] );
+		}
+		foreach ( array_keys( $rows ) as $page_id ) {
+			$titleBuilder = new TitleBuilder( [] );
+			// assume that the migrated pages go to the default namespace
+			//naming convention: <project_identifier>/<root_page>/<sub_page>/..
+			$rows[$page_id]['formatted_title'] = $titleBuilder->setNamespace( 0 )
+				->appendTitleSegment( $rows[$page_id]['title'] )
+				->build();
+			$this->dataBuckets->addData( 'wiki-pages', $page_id, $rows[$page_id], false, false );
+			// TODO: check whether "/" breaks the output
+		}
+		// Page titles starting with "µ" are converted to capital "Μ" but not "M" in MediaWiki
+	}
+
+	/**
+	 * Analyze revisions of wiki pages
+	 *
+	 * @param SqlConnection $connection
+	 */
+	protected function doStatistics( $connection ) {
+		print_r( "\nstatistics:\n" );
+
+		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		print_r( " - " . count( $wikiPages ) . " pages loaded\n" );
+	}
+
+	/**
+	 * @param array|null $row
+	 * @param string $table
+	 * @return bool
+	 */
+	protected function analyzeRow( $row, $table ) {
+		return true;
+	}
+
+	/**
+	 *
+	 * @param SplFileInfo $file
+	 * @return bool
+	 */
+	protected function doAnalyzeLegacy( SplFileInfo $file ): bool {
 		// Ignore all files from `attachments/` folder
 		// TODO: Set proper filter in base class
 		if ( basename( dirname( $file->getPathname() ) ) === 'attachments' ) {

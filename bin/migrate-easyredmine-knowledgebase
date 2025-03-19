@@ -4,13 +4,15 @@
 require __DIR__.'/../vendor/autoload.php';
 
 use HalloWelt\MediaWiki\Lib\Migration\CliApp;
-use HalloWelt\MigrateEasyRedmineKnowledgebase\Command\CheckResult;
+#use HalloWelt\MigrateEasyRedmineKnowledgebase\Command\CheckResult;
+use Symfony\Component\Console\Application;
 
 $config = [
-	'file-extension-whitelist' => [ 'xml' ],
+	//'file-extension-whitelist' => [ 'xml' ],
 	'analyzers' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Analyzer\EasyRedmineKnowledgebaseAnalyzer::factory'
 	],
+	/*
 	'extractors' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Extractor\EasyRedmineKnowledgebaseExtractor::factory'
 	],
@@ -20,19 +22,22 @@ $config = [
 	'composers' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Composer\EasyRedmineKnowledgebaseComposer::factory'
 	],
+	*/
 	'@command-overrides' => [
 		'analyze' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Analyze::factory'
 		],
+		/*
 		'extract' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Extract::factory'
 		],
 		'convert' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Convert::factory'
 		]
+		*/
 	]
 ];
 
 $application = new CliApp( $config );
-$application->add( new CheckResult() );
+//$application->add( new CheckResult() );
 $application->run();
