@@ -126,9 +126,8 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 		$filepath = str_replace( $file->getFilename(), '', $file->getPathname() );
 		// not finished here
 		$connection = new SqlConnection( $file );
-		// need to use abstract table name to support names with prefix
 		$this->setNames( $connection );
-		// wiki names not sufficiently used
+		$this->analyzeCategories( $connection );
 		$this->analyzePages( $connection );
 		//$this->analyzeRevisions( $connection );
 		//$this->analyzeRedirects( $connection );
@@ -140,15 +139,67 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 	}
 
 	/**
+	 * Analyze existing story categories, generate pages and revisions
+	 *
+	 * @param SqlConnection $connection
+	 */
+	protected function analyzeCategories( $connection ) {
+		$res = $connection->query(
+			"SELECT c.id AS category_id, c.name AS title, c.parent_id, "
+			. "c.description AS data, c.author_id, c.updated_on "
+			. "FROM easy_knowledge_categories c;"
+		);
+		$rows = [];
+		foreach ( $res as $row ) {
+			$rows[$row['category_id']] = $row;
+			unset( $rows[$row['category_id']]['category_id'] );
+		}
+		foreach ( array_keys( $rows ) as $page_id ) {
+			$titleBuilder = new TitleBuilder( [] );
+			// the migrated pages for categories should go to the Category namespace
+			$builder = $titleBuilder->setNamespace( 14 );
+			$page = $page_id;
+			while ( true ) {
+				$row = $rows[$page];
+				if ( $row['parent_id'] === null ) {
+					$builder = $builder->appendTitleSegment( $row['title'] );
+					break;
+				}
+				$builder = $builder->appendTitleSegment( $row['title'] );
+				$page = $row['parent_id'];
+			}
+			//naming convention: Category:<root_cat>/<sub_cat>/..
+			$rows[$page_id]['formatted_title'] = $builder->invertTitleSegments()->build();
+			$rows[$page_id]['version'] = 1;
+			$message = '<!--EKB-Stories-Migration: generated revision from easy_knowledge_categories table-->';
+			$pageRevision[1] = [
+				'rev_id' => $page_id + 1500000000,
+				'page_id' => $page_id + 1500000000,
+				'author_id' => $rows[$page_id]['author_id'],
+				'author_name' => $this->getUserName( $rows[$page_id]['author_id'] ),
+				'comments' => '',
+				'updated_on' => $rows[$page_id]['updated_on'],
+				'parent_rev_id' => NULL,
+				'data' => $rows[$page_id]['data'] . $message,
+			];
+			unset( $rows[$page_id]['data'] );
+			unset( $rows[$page_id]['author_id'] );
+			unset( $rows[$page_id]['updated_on'] );
+			$this->dataBuckets->addData( 'wiki-pages', $page_id + 1500000000, $rows[$page_id], false, false );
+			$this->dataBuckets->addData( 'page-revisions', $page_id + 1500000000, $pageRevision, false, false );
+		}
+	}
+
+	/**
 	 * Analyze existing wiki pages and generate info wiki-pages array
 	 *
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzePages( $connection ) {
+		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
 		$res = $connection->query(
-			"SELECT id AS page_id, name AS title, author_id, "
-			. "storyviews, created_on, updated_on, version "
-			. "FROM easy_knowledge_stories;"
+			"SELECT s.id AS page_id, s.name AS title, s.version "
+			. "FROM easy_knowledge_stories s;"
 		);
 		$rows = [];
 		foreach ( $res as $row ) {
@@ -156,16 +207,38 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 			unset( $rows[$row['page_id']]['page_id'] );
 		}
 		foreach ( array_keys( $rows ) as $page_id ) {
+			$rows[$page_id]['categories'] = [];
+			$res = $connection->query(
+				"SELECT category_id "
+				. "FROM easy_knowledge_story_categories sc "
+				. "WHERE sc.story_id = $page_id;"
+			);
+			foreach ( $res as $row ) {
+				$id = $row['category_id'] + 1500000000;
+				$category = $wikiPages[$id]['formatted_title'];
+				$rows[$page_id]['categories'][] = $category;
+			}
 			$titleBuilder = new TitleBuilder( [] );
 			// assume that the migrated pages go to the default namespace
-			//naming convention: <project_identifier>/<root_page>/<sub_page>/..
+			// and all pages are imported as root pages
 			$rows[$page_id]['formatted_title'] = $titleBuilder->setNamespace( 0 )
 				->appendTitleSegment( $rows[$page_id]['title'] )
 				->build();
 			$this->dataBuckets->addData( 'wiki-pages', $page_id, $rows[$page_id], false, false );
-			// TODO: check whether "/" breaks the output
 		}
 		// Page titles starting with "µ" are converted to capital "Μ" but not "M" in MediaWiki
+	}
+
+	/**
+	 * @param int $id
+	 * @return string
+	 */
+	protected function getUserName( $id ) {
+		if ( isset( $this->userNames[$id] ) ) {
+			return $this->userNames[$id];
+		}
+		print_r( "User ID " . $id . " not found in userNames\n" );
+		return $id;
 	}
 
 	/**
