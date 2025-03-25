@@ -14,7 +14,11 @@ use SplFileInfo;
 use Symfony\Component\Console\Input\Input;
 use Symfony\Component\Console\Output\Output;
 
-class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOutputAwareInterface, ISourcePathAwareInterface {
+class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
+	IAnalyzer,
+	IOutputAwareInterface,
+	ISourcePathAwareInterface
+{
 
 	/** @var DataBuckets */
 	private $dataBuckets = null;
@@ -36,6 +40,8 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 
 	private const INT_MAX = 2147483647;
 
+	private const EKB_CAT_OFFSET = 1500000000;
+
 	/**
 	 *
 	 * @param array $config
@@ -46,7 +52,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 		parent::__construct( $config, $workspace, $buckets );
 		$this->dataBuckets = new DataBuckets( [
 			'wiki-pages',
-			//'page-revisions',
+			// 'page-revisions',
 			//'attachment-files',
 		] );
 	}
@@ -58,7 +64,9 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 	 * @param DataBuckets $buckets
 	 * @return EasyRedmineKnowledgebaseAnalyzer
 	 */
-	public static function factory( $config, Workspace $workspace, DataBuckets $buckets ): EasyRedmineKnowledgebaseAnalyzer {
+	public static function factory(
+		$config, Workspace $workspace, DataBuckets $buckets
+	): EasyRedmineKnowledgebaseAnalyzer {
 		return new static( $config, $workspace, $buckets );
 	}
 
@@ -129,9 +137,8 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 		$this->setNames( $connection );
 		$this->analyzeCategories( $connection );
 		$this->analyzePages( $connection );
-		//$this->analyzeRevisions( $connection );
-		//$this->analyzeRedirects( $connection );
-		//$this->analyzeAttachments( $connection );
+		$this->analyzeRevisions( $connection );
+		$this->analyzeAttachments( $connection );
 		$this->doStatistics( $connection );
 		// add symphony console output
 
@@ -168,30 +175,31 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 				$builder = $builder->appendTitleSegment( $row['title'] );
 				$page = $row['parent_id'];
 			}
-			//naming convention: Category:<root_cat>/<sub_cat>/..
+			// naming convention: Category:<root_cat>/<sub_cat>/..
 			$rows[$page_id]['formatted_title'] = $builder->invertTitleSegments()->build();
 			$rows[$page_id]['version'] = 1;
 			$message = '<!--EKB-Stories-Migration: generated revision from easy_knowledge_categories table-->';
+			$dummyId = $page_id + self::EKB_CAT_OFFSET;
 			$pageRevision[1] = [
-				'rev_id' => $page_id + 1500000000,
-				'page_id' => $page_id + 1500000000,
+				'rev_id' => $dummyId,
+				'page_id' => $dummyId,
 				'author_id' => $rows[$page_id]['author_id'],
 				'author_name' => $this->getUserName( $rows[$page_id]['author_id'] ),
 				'comments' => '',
 				'updated_on' => $rows[$page_id]['updated_on'],
-				'parent_rev_id' => NULL,
+				'parent_rev_id' => null,
 				'data' => $rows[$page_id]['data'] . $message,
 			];
 			unset( $rows[$page_id]['data'] );
 			unset( $rows[$page_id]['author_id'] );
 			unset( $rows[$page_id]['updated_on'] );
-			$this->dataBuckets->addData( 'wiki-pages', $page_id + 1500000000, $rows[$page_id], false, false );
-			$this->dataBuckets->addData( 'page-revisions', $page_id + 1500000000, $pageRevision, false, false );
+			$this->dataBuckets->addData( 'wiki-pages', $dummyId, $rows[$page_id], false, false );
+			$this->dataBuckets->addData( 'page-revisions', $dummyId, $pageRevision, false, false );
 		}
 	}
 
 	/**
-	 * Analyze existing wiki pages and generate info wiki-pages array
+	 * Analyze existing story pages and generate info wiki-pages array
 	 *
 	 * @param SqlConnection $connection
 	 */
@@ -214,19 +222,134 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 				. "WHERE sc.story_id = $page_id;"
 			);
 			foreach ( $res as $row ) {
-				$id = $row['category_id'] + 1500000000;
+				$id = $row['category_id'] + self::EKB_CAT_OFFSET;
 				$category = $wikiPages[$id]['formatted_title'];
 				$rows[$page_id]['categories'][] = $category;
 			}
 			$titleBuilder = new TitleBuilder( [] );
 			// assume that the migrated pages go to the default namespace
-			// and all pages are imported as root pages
 			$rows[$page_id]['formatted_title'] = $titleBuilder->setNamespace( 0 )
 				->appendTitleSegment( $rows[$page_id]['title'] )
 				->build();
+			// and all pages are imported as root pages
+			$rows[$page_id]['parent_id'] = null;
 			$this->dataBuckets->addData( 'wiki-pages', $page_id, $rows[$page_id], false, false );
 		}
 		// Page titles starting with "µ" are converted to capital "Μ" but not "M" in MediaWiki
+	}
+
+	/**
+	 * Analyze revisions of story pages
+	 *
+	 * @param SqlConnection $connection
+	 */
+	protected function analyzeRevisions( $connection ) {
+		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		foreach ( array_keys( $wikiPages ) as $page_id ) {
+			$res = $connection->query(
+				"SELECT sv.id AS rev_id, "
+				. "sv.easy_knowledge_story_id AS page_id, "
+				. "sv.author_id, sv.description AS data, "
+				. "sv.updated_on, sv.version "
+				. "FROM easy_knowledge_story_versions sv "
+				. "WHERE easy_knowledge_story_id = " . $page_id . " "
+				. "ORDER BY sv.version;"
+			);
+			// ORDER BY sv.version is ascending by default, which is important
+			$rows = [];
+			$last_ver = null;
+			foreach ( $res as $row ) {
+				$ver = $row['version'];
+				$rows[$ver] = $row;
+				unset( $rows[$ver]['version'] );
+				$rows[$ver]['parent_rev_id'] = ( $last_ver !== null ) ?
+					$rows[$last_ver]['rev_id']
+					: null;
+				$last_ver = $ver;
+				$rows[$ver]['author_name'] = $this->getUserName( $row['author_id'] );
+				$rows[$ver]['comments'] = '';
+			}
+			if ( count( $rows ) !== 0 ) {
+				$this->dataBuckets->addData( 'page-revisions', $page_id, $rows, false, false );
+			}
+		}
+	}
+
+	/**
+	 * Analyze attachments, table and files
+	 *
+	 * Generate pages and revisions for attachments
+	 * @param SqlConnection $connection
+	 */
+	protected function analyzeAttachments( $connection ) {
+		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
+		$rows = [];
+		$commonClause = "SELECT u.attachment_id, u.id AS revision_id, "
+			. "u.version, u.author_id, u.created_on, u.updated_at, "
+			. "u.description, u.filename, u.disk_directory, u.disk_filename, "
+			. "u.content_type, u.filesize, u.digest, u.container_id "
+			. "FROM attachment_versions u "
+			. "INNER JOIN attachments a ON a.id = u.attachment_id ";
+		$res = $connection->query(
+			$commonClause
+			. "INNER JOIN easy_knowledge_stories s ON u.container_id = s.id "
+			. "WHERE u.container_type = 'EasyKnowledgeStory'; "
+		);
+		foreach ( $res as $row ) {
+			$pathPrefix = $row['disk_directory']
+				? $row['disk_directory'] . DIRECTORY_SEPARATOR
+				: '';
+			$rows[$row['attachment_id']][$row['version']] = [
+				'created_on' => $row['created_on'],
+				'updated_at' => $row['updated_at'],
+				'summary' => $row['description'],
+				'user_id' => $row['author_id'],
+				'filename' => $row['filename'],
+				'source_path' => $pathPrefix . $row['disk_filename'],
+				'target_path' => $pathPrefix . $row['filename'],
+				'quoted_page_id' => $row['container_id'],
+			];
+		}
+		// generate a dummy page with a dummy revision for each attachment
+		// the only important thing is the title
+		$wikiPages = [];
+		foreach ( array_keys( $rows ) as $id ) {
+			// store attachment versions elsewhere to generate batch script
+			$this->dataBuckets->addData( 'attachment-files', $id, $rows[$id], false, false );
+
+			$maxVersion = max( array_keys( $rows[$id] ) );
+			$file = $rows[$id][$maxVersion];
+			$titleBuilder = new TitleBuilder( [] );
+			$fTitle = $titleBuilder
+				->setNamespace( 6 )
+				->appendTitleSegment( $file['filename'] )
+				->build();
+			$dummyId = $id + 1000000000;
+			$wikiPages[$dummyId] = [
+				'title' => $file['filename'],
+				'version' => 1,
+				'formatted_title' => $fTitle,
+				'parent_id' => null,
+			];
+			$pageRevision = [
+				1 => [
+					'rev_id' => $dummyId,
+					'page_id' => $dummyId,
+					'author_name' => $this->getUserName( $file['user_id'] ),
+					'author_id' => $file['user_id'],
+					'data' => '',
+					'comments' => 'EKB-Stories-Migration: generated revision from attachment_versions table.',
+					'updated_on' => $file['updated_at'],
+					'parent_rev_id' => null,
+				],
+			];
+			$this->dataBuckets->addData( 'page-revisions', $dummyId, $pageRevision, false, false );
+		}
+		foreach ( array_keys( $wikiPages ) as $id ) {
+			$this->dataBuckets->addData( 'wiki-pages', $id, $wikiPages[$id], false, false );
+		}
+		print_r( "[wiki-pages] " . count( $wikiPages ) . " rows injected by analyzeAttachments\n" );
 	}
 
 	/**
@@ -242,7 +365,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 	}
 
 	/**
-	 * Analyze revisions of wiki pages
+	 * Output statistics
 	 *
 	 * @param SqlConnection $connection
 	 */
@@ -251,6 +374,27 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements IAnalyzer, IOu
 
 		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
 		print_r( " - " . count( $wikiPages ) . " pages loaded\n" );
+
+		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
+		$revCount = 0;
+		foreach ( array_keys( $pageRevisions ) as $page_id ) {
+			$revCount += count( $pageRevisions[$page_id] );
+			foreach ( array_keys( $pageRevisions[$page_id] ) as $ver ) {
+				if ( !isset( $pageRevisions[$page_id][$ver]['author_name'] ) ) {
+					print_r( "author_name not set for page_id: " . $page_id . " ver: " . $ver . "\n" );
+					var_dump( $pageRevisions[$page_id][$ver] );
+				}
+			}
+		}
+		print_r( " - " . $revCount . " page revisions loaded\n" );
+
+		$attachmentFiles = $this->dataBuckets->getBucketData( 'attachment-files' );
+		print_r( " - " . count( $attachmentFiles ) . " attachments loaded\n" );
+		$fileCount = 0;
+		foreach ( array_keys( $attachmentFiles ) as $id ) {
+			$fileCount += count( $attachmentFiles[$id] );
+		}
+		print_r( " - " . $fileCount . " attachment versions loaded\n" );
 	}
 
 	/**
