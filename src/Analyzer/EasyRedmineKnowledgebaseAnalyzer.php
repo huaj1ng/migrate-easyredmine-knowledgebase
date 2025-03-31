@@ -52,8 +52,9 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 		parent::__construct( $config, $workspace, $buckets );
 		$this->dataBuckets = new DataBuckets( [
 			'wiki-pages',
-			// 'page-revisions',
-			//'attachment-files',
+			'page-revisions',
+			'attachment-files',
+			'customizations',
 		] );
 	}
 
@@ -204,6 +205,15 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzePages( $connection ) {
+		$customizations = $this->dataBuckets->getBucketData( 'customizations' );
+		if ( !isset( $customizations['is-enabled'] ) || $customizations['is-enabled'] !== true ) {
+			print_r( "No customization enabled\n" );
+			$customizations = [];
+			$customizations['is-enabled'] = false;
+		} else {
+			print_r( "Customizations loaded\n" );
+		}
+
 		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
 		$res = $connection->query(
 			"SELECT s.id AS page_id, s.name AS title, s.version "
@@ -233,6 +243,15 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				->build();
 			// and all pages are imported as root pages
 			$rows[$page_id]['parent_id'] = null;
+
+			$fTitle = $rows[$page_id]['formatted_title'];
+			if ( $customizations['is-enabled'] && isset( $customizations['pages-to-modify'][$fTitle] ) ) {
+				if ( $customizations['pages-to-modify'][$fTitle] === false ) {
+					continue;
+				} else {
+					$rows[$page_id]['formatted_title'] = $customizations['pages-to-modify'][$fTitle];
+				}
+			}
 			$this->dataBuckets->addData( 'wiki-pages', $page_id, $rows[$page_id], false, false );
 		}
 		// Page titles starting with "µ" are converted to capital "Μ" but not "M" in MediaWiki
@@ -297,6 +316,10 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			. "WHERE u.container_type = 'EasyKnowledgeStory'; "
 		);
 		foreach ( $res as $row ) {
+			if ( !isset( $wikiPages[$row['container_id']] ) ) {
+				print_r( "Attachment " . $row['filename'] . " skipped\n" );
+				continue;
+			}
 			$pathPrefix = $row['disk_directory']
 				? $row['disk_directory'] . DIRECTORY_SEPARATOR
 				: '';
@@ -349,7 +372,6 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 		foreach ( array_keys( $wikiPages ) as $id ) {
 			$this->dataBuckets->addData( 'wiki-pages', $id, $wikiPages[$id], false, false );
 		}
-		print_r( "[wiki-pages] " . count( $wikiPages ) . " rows injected by analyzeAttachments\n" );
 	}
 
 	/**

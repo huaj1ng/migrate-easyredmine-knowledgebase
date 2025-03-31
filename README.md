@@ -13,4 +13,18 @@ This is a command line tool to convert the contents of a EasyRedmine Knowledgeba
 
 ## Workflow
 
+### Prepare
+Optionally if you would like to remove or change title of certain pages, please have an `workspace/customizations.php` like:
+```php
+<?php
+
+return array (
+  'is-enabled' => true,
+  'pages-to-modify' => 
+  array (
+    'Formatted_page_title_to_delete' => false,
+    'Formatted_page_title_to_alter' => 'Namespace:Altered_root_page/Altered_title',
+  ),
+);
+```
 TBD
