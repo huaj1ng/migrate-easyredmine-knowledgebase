@@ -2,57 +2,46 @@
 
 namespace HalloWelt\MigrateEasyRedmineKnowledgebase\Extractor;
 
-use DOMDocument;
+use HalloWelt\MediaWiki\Lib\Migration\DataBuckets;
 use HalloWelt\MediaWiki\Lib\Migration\ExtractorBase;
-use HalloWelt\MigrateEasyRedmineKnowledgebase\Utility\XMLHelper;
+use HalloWelt\MediaWiki\Lib\Migration\Workspace;
 use SplFileInfo;
 
 class EasyRedmineKnowledgebaseExtractor extends ExtractorBase {
-
 	/**
-	 *
-	 * @var DOMDocument
+	 * @param array $config
+	 * @param Workspace $workspace
+	 * @param DataBuckets $buckets
 	 */
-	private $dom = null;
+	public function __construct( $config, Workspace $workspace, DataBuckets $buckets ) {
+		$this->config = $config;
+		$this->workspace = $workspace;
+		$this->buckets = $buckets;
+		$this->analyzeBuckets = new DataBuckets( [
+			'attachment-files',
+		] );
+		$this->analyzeBuckets->loadFromWorkspace( $workspace );
+	}
 
 	/**
-	 * @var XMLHelper
-	 */
-	private $helper = null;
-
-	/**
-	 * @var array
-	 */
-	private $categories = [];
-
-	/**
-	 * @param SplFileInfo $file
+	 * @param SplFileInfo $sourceDir
 	 * @return bool
 	 */
-	protected function doExtract( SplFileInfo $file ): bool {
-		$this->dom = new DOMDocument();
-		$this->dom->recover = true;
-
-		$fileContent = file_get_contents( $file->getPathname() );
-		// Source is offly formatted:
-		// Files start with `<?xml version="1.0" encoding="UTF-8"?_>` but have no root node!
-		$lines = explode( "\n", $fileContent );
-
-		if ( strpos( $lines[0], '<?xml' ) === 0 ) {
-			unset( $lines[0] );
+	protected function doExtract( SplFileInfo $sourceDir ): bool {
+		$attachments = $this->analyzeBuckets->getBucketData( 'attachment-files' );
+		foreach ( $attachments as $attachment ) {
+			foreach ( $attachment as $file ) {
+				$sourcePath = $sourceDir->getPathname() . '/' . $file['source_path'];
+				if ( !is_file( $sourcePath ) ) {
+					print_r( "File not found: " . $sourcePath . "\n" );
+					continue;
+				}
+				$targetPath = $this->workspace->saveUploadFile(
+					$file['target_path'],
+					file_get_contents( $sourcePath )
+				);
+			}
 		}
-		$newFileContent = implode( "\n", $lines );
-		$newFileContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><xml>$newFileContent</xml>";
-		$newFileContent = preg_replace(
-			'/(<description>)(.*?)(<\/description>)/si',
-			'$1<![CDATA[$2]]>$3',
-			$newFileContent
-		);
-
-		$this->dom->loadXML( $newFileContent );
-
-		throw new \Exception( "Implement me" );
-
 		return true;
 	}
 }

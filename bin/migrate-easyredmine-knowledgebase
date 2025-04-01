@@ -26,13 +26,13 @@ $config = [
 	'command-overrides' => [
 		'analyze' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Analyze::factory'
-		],/*
+		],
 		'extract' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Extract::factory'
-		],
+		],/*
 		'convert' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Convert::factory'
-		]*/
+		],*/
 	]
 ];
 

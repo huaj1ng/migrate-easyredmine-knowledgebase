@@ -5,6 +5,9 @@ namespace HalloWelt\MigrateEasyRedmineKnowledgebase\Command;
 use HalloWelt\MediaWiki\Lib\Migration\Command\Analyze as BaseAnalyze;
 
 class Analyze extends BaseAnalyze {
+	/**
+	 * @return array
+	 */
 	protected function getBucketKeys() {
 		return [
 			'wiki-pages',
