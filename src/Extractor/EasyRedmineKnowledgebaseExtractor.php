@@ -2,33 +2,23 @@
 
 namespace HalloWelt\MigrateEasyRedmineKnowledgebase\Extractor;
 
-use HalloWelt\MediaWiki\Lib\Migration\DataBuckets;
-use HalloWelt\MediaWiki\Lib\Migration\ExtractorBase;
-use HalloWelt\MediaWiki\Lib\Migration\Workspace;
+use HalloWelt\MediaWiki\Lib\Migration\IExtractor;
+use HalloWelt\MigrateEasyRedmineKnowledgebase\SimpleHandler;
 use SplFileInfo;
 
-class EasyRedmineKnowledgebaseExtractor extends ExtractorBase {
-	/**
-	 * @param array $config
-	 * @param Workspace $workspace
-	 * @param DataBuckets $buckets
-	 */
-	public function __construct( $config, Workspace $workspace, DataBuckets $buckets ) {
-		$this->config = $config;
-		$this->workspace = $workspace;
-		$this->buckets = $buckets;
-		$this->analyzeBuckets = new DataBuckets( [
-			'attachment-files',
-		] );
-		$this->analyzeBuckets->loadFromWorkspace( $workspace );
-	}
+class EasyRedmineKnowledgebaseExtractor extends SimpleHandler implements IExtractor {
+
+	/** @var array */
+	protected $dataBucketList = [
+		'attachment-files',
+	];
 
 	/**
 	 * @param SplFileInfo $sourceDir
 	 * @return bool
 	 */
-	protected function doExtract( SplFileInfo $sourceDir ): bool {
-		$attachments = $this->analyzeBuckets->getBucketData( 'attachment-files' );
+	public function extract( SplFileInfo $sourceDir ): bool {
+		$attachments = $this->dataBuckets->getBucketData( 'attachment-files' );
 		foreach ( $attachments as $attachment ) {
 			foreach ( $attachment as $file ) {
 				$sourcePath = $sourceDir->getPathname() . '/' . $file['source_path'];

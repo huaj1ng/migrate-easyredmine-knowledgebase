@@ -29,10 +29,10 @@ $config = [
 		],
 		'extract' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Extract::factory'
-		],/*
+		],
 		'convert' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Convert::factory'
-		],*/
+		],
 	]
 ];
 
