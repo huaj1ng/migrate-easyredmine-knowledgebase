@@ -8,29 +8,18 @@ use HalloWelt\MediaWiki\Lib\Migration\IAnalyzer;
 use HalloWelt\MediaWiki\Lib\Migration\IOutputAwareInterface;
 use HalloWelt\MediaWiki\Lib\Migration\SqlConnection;
 use HalloWelt\MediaWiki\Lib\Migration\TitleBuilder;
-use HalloWelt\MediaWiki\Lib\Migration\Workspace;
-use HalloWelt\MigrateEasyRedmineKnowledgebase\ISourcePathAwareInterface;
 use SplFileInfo;
-use Symfony\Component\Console\Input\Input;
 use Symfony\Component\Console\Output\Output;
 
 class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	IAnalyzer,
-	IOutputAwareInterface,
-	ISourcePathAwareInterface
+	IOutputAwareInterface
 {
-
-	/** @var DataBuckets */
-	private $dataBuckets = null;
-
-	/** @var Input */
-	private $input = null;
-
 	/** @var Output */
 	private $output = null;
 
-	/** @var string */
-	private $src = '';
+	/** @var DataBuckets */
+	private $customBuckets = null;
 
 	/** @var array */
 	private $userNames = [];
@@ -43,54 +32,17 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	private const EKB_CAT_OFFSET = 1500000000;
 
 	/**
-	 *
-	 * @param array $config
-	 * @param Workspace $workspace
-	 * @param DataBuckets $buckets
-	 */
-	public function __construct( $config, Workspace $workspace, DataBuckets $buckets ) {
-		parent::__construct( $config, $workspace, $buckets );
-		$this->dataBuckets = new DataBuckets( [
-			'wiki-pages',
-			'page-revisions',
-			'attachment-files',
-			'customizations',
-		] );
-	}
-
-	/**
-	 *
-	 * @param array $config
-	 * @param Workspace $workspace
-	 * @param DataBuckets $buckets
-	 * @return EasyRedmineKnowledgebaseAnalyzer
-	 */
-	public static function factory(
-		$config, Workspace $workspace, DataBuckets $buckets
-	): EasyRedmineKnowledgebaseAnalyzer {
-		return new static( $config, $workspace, $buckets );
-	}
-
-	/**
-	 * @param Input $input
-	 */
-	public function setInput( Input $input ) {
-		$this->input = $input;
-	}
-
-	/**
 	 * @param Output $output
 	 */
 	public function setOutput( Output $output ) {
 		$this->output = $output;
 	}
 
-	/**
-	 * @param string $path
-	 * @return void
-	 */
-	public function setSourcePath( $path ) {
-		$this->src = $path;
+	protected function setCustomBuckets() {
+		$this->customBuckets = new DataBuckets( [
+			'customizations',
+		] );
+		$this->customBuckets->loadFromWorkspace( $this->workspace );
 	}
 
 	/**
@@ -110,16 +62,15 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	}
 
 	/**
-	 *
-	 * @param SplFileInfo $file
-	 * @return bool
+	 * @param int $id
+	 * @return string
 	 */
-	public function analyze( SplFileInfo $file ): bool {
-		$this->dataBuckets->loadFromWorkspace( $this->workspace );
-		$result = parent::analyze( $file );
-
-		$this->dataBuckets->saveToWorkspace( $this->workspace );
-		return $result;
+	protected function getUserName( $id ) {
+		if ( isset( $this->userNames[$id] ) ) {
+			return $this->userNames[$id];
+		}
+		print_r( "User ID " . $id . " not found in userNames\n" );
+		return $id;
 	}
 
 	/**
@@ -132,8 +83,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			print_r( "Please use a connection.json!" );
 			return true;
 		}
-		$filepath = str_replace( $file->getFilename(), '', $file->getPathname() );
-		// not finished here
+		$this->setCustomBuckets();
 		$connection = new SqlConnection( $file );
 		$this->setNames( $connection );
 		$this->analyzeCategories( $connection );
@@ -194,8 +144,8 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			unset( $rows[$page_id]['data'] );
 			unset( $rows[$page_id]['author_id'] );
 			unset( $rows[$page_id]['updated_on'] );
-			$this->dataBuckets->addData( 'wiki-pages', $dummyId, $rows[$page_id], false, false );
-			$this->dataBuckets->addData( 'page-revisions', $dummyId, $pageRevision, false, false );
+			$this->buckets->addData( 'wiki-pages', $dummyId, $rows[$page_id], false, false );
+			$this->buckets->addData( 'page-revisions', $dummyId, $pageRevision, false, false );
 		}
 	}
 
@@ -205,7 +155,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzePages( $connection ) {
-		$customizations = $this->dataBuckets->getBucketData( 'customizations' );
+		$customizations = $this->customBuckets->getBucketData( 'customizations' );
 		if ( !isset( $customizations['is-enabled'] ) || $customizations['is-enabled'] !== true ) {
 			print_r( "No customization enabled\n" );
 			$customizations = [];
@@ -214,7 +164,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			print_r( "Customizations loaded\n" );
 		}
 
-		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
 		$res = $connection->query(
 			"SELECT s.id AS page_id, s.name AS title, s.version "
 			. "FROM easy_knowledge_stories s;"
@@ -252,7 +202,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 					$rows[$page_id]['formatted_title'] = $customizations['pages-to-modify'][$fTitle];
 				}
 			}
-			$this->dataBuckets->addData( 'wiki-pages', $page_id, $rows[$page_id], false, false );
+			$this->buckets->addData( 'wiki-pages', $page_id, $rows[$page_id], false, false );
 		}
 		// Page titles starting with "µ" are converted to capital "Μ" but not "M" in MediaWiki
 	}
@@ -263,7 +213,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzeRevisions( $connection ) {
-		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
 		foreach ( array_keys( $wikiPages ) as $page_id ) {
 			$res = $connection->query(
 				"SELECT sv.id AS rev_id, "
@@ -289,7 +239,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				$rows[$ver]['comments'] = '';
 			}
 			if ( count( $rows ) !== 0 ) {
-				$this->dataBuckets->addData( 'page-revisions', $page_id, $rows, false, false );
+				$this->buckets->addData( 'page-revisions', $page_id, $rows, false, false );
 			}
 		}
 	}
@@ -301,8 +251,8 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzeAttachments( $connection ) {
-		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
-		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
+		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
+		$pageRevisions = $this->buckets->getBucketData( 'page-revisions' );
 		$rows = [];
 		$commonClause = "SELECT u.attachment_id, u.id AS revision_id, "
 			. "u.version, u.author_id, u.created_on, u.updated_at, "
@@ -339,7 +289,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 		$wikiPages = [];
 		foreach ( array_keys( $rows ) as $id ) {
 			// store attachment versions elsewhere to generate batch script
-			$this->dataBuckets->addData( 'attachment-files', $id, $rows[$id], false, false );
+			$this->buckets->addData( 'attachment-files', $id, $rows[$id], false, false );
 
 			$maxVersion = max( array_keys( $rows[$id] ) );
 			$file = $rows[$id][$maxVersion];
@@ -367,23 +317,11 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 					'parent_rev_id' => null,
 				],
 			];
-			$this->dataBuckets->addData( 'page-revisions', $dummyId, $pageRevision, false, false );
+			$this->buckets->addData( 'page-revisions', $dummyId, $pageRevision, false, false );
 		}
 		foreach ( array_keys( $wikiPages ) as $id ) {
-			$this->dataBuckets->addData( 'wiki-pages', $id, $wikiPages[$id], false, false );
+			$this->buckets->addData( 'wiki-pages', $id, $wikiPages[$id], false, false );
 		}
-	}
-
-	/**
-	 * @param int $id
-	 * @return string
-	 */
-	protected function getUserName( $id ) {
-		if ( isset( $this->userNames[$id] ) ) {
-			return $this->userNames[$id];
-		}
-		print_r( "User ID " . $id . " not found in userNames\n" );
-		return $id;
 	}
 
 	/**
@@ -394,10 +332,10 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	protected function doStatistics( $connection ) {
 		print_r( "\nstatistics:\n" );
 
-		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
 		print_r( " - " . count( $wikiPages ) . " pages loaded\n" );
 
-		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
+		$pageRevisions = $this->buckets->getBucketData( 'page-revisions' );
 		$revCount = 0;
 		foreach ( array_keys( $pageRevisions ) as $page_id ) {
 			$revCount += count( $pageRevisions[$page_id] );
@@ -410,7 +348,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 		}
 		print_r( " - " . $revCount . " page revisions loaded\n" );
 
-		$attachmentFiles = $this->dataBuckets->getBucketData( 'attachment-files' );
+		$attachmentFiles = $this->buckets->getBucketData( 'attachment-files' );
 		print_r( " - " . count( $attachmentFiles ) . " attachments loaded\n" );
 		$fileCount = 0;
 		foreach ( array_keys( $attachmentFiles ) as $id ) {
@@ -420,92 +358,9 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	}
 
 	/**
-	 * @param array|null $row
-	 * @param string $table
-	 * @return bool
+	 * @inheritDoc
 	 */
 	protected function analyzeRow( $row, $table ) {
-		return true;
-	}
-
-	/**
-	 *
-	 * @param SplFileInfo $file
-	 * @return bool
-	 */
-	protected function doAnalyzeLegacy( SplFileInfo $file ): bool {
-		// Ignore all files from `attachments/` folder
-		// TODO: Set proper filter in base class
-		if ( basename( dirname( $file->getPathname() ) ) === 'attachments' ) {
-			return true;
-		}
-		$this->dom = new DOMDocument();
-		$this->dom->recover = true;
-
-		$fileContent = file_get_contents( $file->getPathname() );
-		// Source is offly formatted:
-		// Files start with `<?xml version="1.0" encoding="UTF-8"?_>` but have no root node!
-		$lines = explode( "\n", $fileContent );
-
-		if ( strpos( $lines[0], '<?xml' ) === 0 ) {
-			unset( $lines[0] );
-		}
-		$newFileContent = implode( "\n", $lines );
-		$newFileContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><xml>$newFileContent</xml>";
-		$newFileContent = preg_replace(
-			'/(<description>)(.*?)(<\/description>)/si',
-			'$1<![CDATA[$2]]>$3',
-			$newFileContent
-		);
-
-		$this->dom->loadXML( $newFileContent );
-
-		$ermStoryEls = $this->dom->getElementsByTagName( 'easy_knowledge_story' );
-		if ( $ermStoryEls->count() === 0 ) {
-			return false;
-		}
-		if ( $ermStoryEls->count() > 1 ) {
-			throw new \Exception( 'More than one <easy_knowledge_story> element found in file!' );
-		}
-		$ermStoryEl = $ermStoryEls->item( 0 );
-		$pageTitle = $ermStoryEl->getElementsByTagName( 'name' )->item( 0 )->nodeValue;
-		$updatedOn = $ermStoryEl->getElementsByTagName( 'updated_on' )->item( 0 )->nodeValue;
-		$createdOn = $ermStoryEl->getElementsByTagName( 'created_on' )->item( 0 )->nodeValue;
-
-		$this->output->writeln( "Title: $pageTitle" );
-
-		$ermAuthorEls = $this->dom->getElementsByTagName( 'author' );
-		$authors = [];
-		foreach ( $ermAuthorEls as $ermAuthorEl ) {
-			$firstName = $ermAuthorEl->getElementsByTagName( 'first_name' )->item( 0 )->nodeValue;
-			$lastName = $ermAuthorEl->getElementsByTagName( 'last_name' )->item( 0 )->nodeValue;
-			$email = $ermAuthorEl->getElementsByTagName( 'email' )->item( 0 )->nodeValue;
-			$author = $firstName . ' ' . $lastName . ' <' . $email . '>';
-			$authors[] = $author;
-		}
-		$this->output->writeln( "Authors: " . implode( ', ', $authors ) );
-
-		$ermCategoryEls = $this->dom->getElementsByTagName( 'category' );
-		$categories = [];
-		foreach ( $ermCategoryEls as $ermCategoryEl ) {
-			$nameEl = $ermCategoryEl->getElementsByTagName( 'name' )->item( 0 );
-			// <attachment> may also contain a <category> element, which is completely empty
-			if ( !$nameEl ) {
-				continue;
-			}
-			$category = $nameEl->nodeValue;
-			$categories[] = $category;
-		}
-		$this->output->writeln( "Categories: " . implode( ', ', $categories ) );
-
-		$ermAttachmentEls = $this->dom->getElementsByTagName( 'attachment' );
-		$attachments = [];
-		foreach ( $ermAttachmentEls as $ermAttachmentEl ) {
-			$filePath = $ermAttachmentEl->getElementsByTagName( 'file_path' )->item( 0 )->nodeValue;
-			$attachments[] = $filePath;
-		}
-		$this->output->writeln( "Attachments: " . implode( ', ', $attachments ) );
-
 		return true;
 	}
 }

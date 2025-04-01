@@ -12,29 +12,27 @@ $config = [
 	'analyzers' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Analyzer\EasyRedmineKnowledgebaseAnalyzer::factory'
 	],
-	/*
 	'extractors' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Extractor\EasyRedmineKnowledgebaseExtractor::factory'
 	],
 	'converters' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Converter\EasyRedmineKnowledgebaseConverter::factory'
 	],
+	/*
 	'composers' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Composer\EasyRedmineKnowledgebaseComposer::factory'
 	],
 	*/
-	'@command-overrides' => [
+	'command-overrides' => [
 		'analyze' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Analyze::factory'
-		],
-		/*
+		],/*
 		'extract' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Extract::factory'
 		],
 		'convert' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Convert::factory'
-		]
-		*/
+		]*/
 	]
 ];
 
