@@ -2,60 +2,73 @@
 
 namespace HalloWelt\MigrateEasyRedmineKnowledgebase\Composer;
 
-use HalloWelt\MediaWiki\Lib\MediaWikiXML\Builder;
-use HalloWelt\MediaWiki\Lib\Migration\ComposerBase;
-use HalloWelt\MediaWiki\Lib\Migration\DataBuckets;
-use HalloWelt\MediaWiki\Lib\Migration\IOutputAwareInterface;
-use HalloWelt\MediaWiki\Lib\Migration\Workspace;
-use Symfony\Component\Console\Output\Output;
+use DOMDocument;
+use DOMElement;
+use HalloWelt\MigrateEasyRedmineKnowledgebase\SimpleHandler;
 
-class EasyRedmineKnowledgebaseComposer extends ComposerBase implements IOutputAwareInterface {
+class EasyRedmineKnowledgebaseComposer extends SimpleHandler {
 
-	/**
-	 * @var DataBuckets
-	 */
-	private $dataBuckets;
+	/** @var array */
+	protected $dataBucketList = [
+		'wiki-pages',
+		'page-revisions',
+		'revision-wikitext',
+	];
 
-	/**
-	 * @var Output
-	 */
-	private $output = null;
+	/** @var DOMDocument */
+	protected $dom = null;
 
 	/**
-	 * @param array $config
-	 * @param Workspace $workspace
-	 * @param DataBuckets $buckets
+	 * @param string $destFilepath
+	 * @return bool
 	 */
-	public function __construct( $config, Workspace $workspace, DataBuckets $buckets ) {
-		parent::__construct( $config, $workspace, $buckets );
-
-		$this->dataBuckets = new DataBuckets( [
-			'body-contents-to-pages-map',
-			'title-attachments',
-			'title-revisions',
-			'files'
-		] );
-
-		$this->customBuckets = new DataBuckets( [
-			'title-uploads',
-			'title-uploads-fail'
-		] );
-
-		$this->dataBuckets->loadFromWorkspace( $this->workspace );
+	public function buildAndSave( $destFilepath ) {
+		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
+		$revisionWikitext = $this->dataBuckets->getBucketData( 'revision-wikitext' );
+		$this->dom = new DOMDocument();
+		$this->dom->formatOutput = true;
+		$this->dom->loadXML( '<mediawiki></mediawiki>' );
+		foreach ( $wikiPages as $id => $page ) {
+			$pageEl = $this->dom->createElement( 'page' );
+			$this->addTextElTo( $pageEl, 'title', $page['formatted_title'] );
+			$this->addTextElTo( $pageEl, 'id', $id );
+			# addTextElTo( $pageEl, 'redirect', $page['redirect'] );
+			foreach ( $pageRevisions[$id] as $version => $revision ) {
+				$revEl = $this->dom->createElement( 'revision' );
+				$this->addTextElTo( $revEl, 'id', $revision['rev_id'] );
+				$this->addTextElTo( $revEl, 'parentid', $revision['parent_rev_id'] );
+				$this->addTextElTo( $revEl, 'timestamp', $revision['updated_on'] );
+				$this->addTextElTo( $revEl, 'comment', $revision['comments'] );
+				$this->addTextElTo( $revEl, 'model', 'wikitext' );
+				$this->addTextElTo( $revEl, 'format', 'text/x-wiki' );
+				$contributorEl = $this->dom->createElement( 'contributor' );
+				$this->addTextElTo( $contributorEl, 'username', $revision['author_name'] );
+				$this->addTextElTo( $contributorEl, 'id', $revision['author_id'] );
+				$revEl->appendChild( $contributorEl );
+				$this->addTextElTo( $revEl, 'text', $revisionWikitext[$id][$version] );
+				$pageEl->appendChild( $revEl );
+			}
+			$this->dom->documentElement->appendChild( $pageEl );
+		}
+		$writtenBytes = file_put_contents(
+			$destFilepath,
+			$this->dom->saveXML( $this->dom->documentElement )
+		);
+		return $writtenBytes !== false;
 	}
 
 	/**
-	 * @param Output $output
+	 * @param DOMElement $targetEl
+	 * @param string $name
+	 * @param mixed $text
 	 */
-	public function setOutput( Output $output ) {
-		$this->output = $output;
-	}
-
-	/**
-	 * @param Builder $builder
-	 * @return void
-	 */
-	public function buildXML( Builder $builder ) {
-		throw new \Exception( "Implement me" );
+	public function addTextElTo( $targetEl, $name, $text ) {
+		if ( $text === null ) {
+			return;
+		}
+		$el = $this->dom->createElement( $name );
+		$el->appendChild( $this->dom->createTextNode( $text ) );
+		$targetEl->appendChild( $el );
 	}
 }

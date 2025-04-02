@@ -18,11 +18,9 @@ $config = [
 	'converters' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Converter\EasyRedmineKnowledgebaseConverter::factory'
 	],
-	/*
 	'composers' => [
 		'HalloWelt\MigrateEasyRedmineKnowledgebase\Composer\EasyRedmineKnowledgebaseComposer::factory'
 	],
-	*/
 	'command-overrides' => [
 		'analyze' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Analyze::factory'
@@ -32,6 +30,9 @@ $config = [
 		],
 		'convert' => [
 			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Convert::factory'
+		],
+		'compose' => [
+			'factory' => 'HalloWelt\MigrateEasyRedmineKnowledgebase\Command\Compose::factory'
 		],
 	]
 ];
