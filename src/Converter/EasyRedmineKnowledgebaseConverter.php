@@ -3,6 +3,7 @@
 namespace HalloWelt\MigrateEasyRedmineKnowledgebase\Converter;
 
 use HalloWelt\MigrateEasyRedmineKnowledgebase\SimpleHandler;
+use HalloWelt\MigrateEasyRedmineKnowledgebase\Utility\ConvertToolbox;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Console\Output\ConsoleOutput;
 
@@ -12,13 +13,16 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	protected $dataBucketList = [
 		'wiki-pages',
 		'page-revisions',
-		'customizations',
 	];
+
+	/** @var ConvertToolbox */
+	protected $toolbox = null;
 
 	/**
 	 * @return bool
 	 */
 	public function convert(): bool {
+		$this->toolbox = new ConvertToolbox( $this->workspace );
 		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
 		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
 
@@ -32,7 +36,9 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 			$result = [];
 			foreach ( $pageRevisions[$id] as $version => $revision ) {
 				$content = $revision['data'];
-				$content = $this->textileToMediaWiki( $content );
+				$content = $this->preprocess( $content );
+				// $content = $this->processWithPandoc( $content, 'html', 'textile' );
+				$content = $this->processWithPandoc( $content, 'textile', 'mediawiki' );
 				$content = $this->handlePreTags( $content );
 				$result[$version] = $content;
 			}
@@ -47,11 +53,23 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	/**
 	 * @param string $content
 	 * @return string
+	 */
+	public function preprocess( $content ) {
+		$content = $this->toolbox->replaceCustomized( $content );
+		// $content = $this->toolbox->replaceInlineBeforePandoc( $content );
+		return $content;
+	}
+
+	/**
+	 * @param string $content
+	 * @param string $source
+	 * @param string $target
+	 * @return string
 	 * @phpcs:disable MediaWiki.Usage.ForbiddenFunctions.proc_open
 	 */
-	public function textileToMediaWiki( $content ) {
+	public function processWithPandoc( $content, $source, $target ) {
 		$process = proc_open(
-			"pandoc --from textile --to mediawiki",
+			"pandoc --from $source --to $target",
 			[
 				0 => [ 'pipe', 'r' ],
 				1 => [ 'pipe', 'w' ],
@@ -62,7 +80,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 		if ( $process === false ) {
 			$this->output->writeln(
 				"<error>Failed to start Pandoc process, "
-				. "textileToMediaWiki conversion skipped </error>"
+				. "conversion from $source to $target skipped </error>"
 			);
 			return $content;
 		}
@@ -96,7 +114,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 				$chunk = $chunks[$i];
 				$parts = explode( "</pre>", $chunk, 2 );
 				if ( count( $parts ) === 2 ) {
-					$result .= $this->convertCodeBlocks( $parts[0] );
+					$result .= $this->toolbox->convertCodeBlocks( $parts[0] );
 					$result .= $this->postprocess( $parts[1] );
 				} else {
 					$result .= "<pre>" . $chunk;
@@ -107,126 +125,87 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	}
 
 	/**
-	 * Converts HTML-encoded code blocks to MediaWiki syntax highlighting
-	 *
-	 * @param string $content Content inside <pre> tags
-	 * @return string
-	 */
-	private function convertCodeBlocks( $content ) {
-		$encodedEntities = [
-			'&lt;' => '<',
-			'&gt;' => '>',
-			'&amp;' => '&',
-			'&quot;' => '"',
-			'&amp;lt;' => '<',
-			'&amp;gt;' => '>',
-			'&amp;amp;' => '&',
-			'&amp;quot;' => '"',
-		];
-		$content = str_replace( array_keys( $encodedEntities ), array_values( $encodedEntities ), $content );
-		$codeSpanPattern = '/<span\s+class="[a-z0-9]+">(.*?)<\/span>/i';
-		$content = preg_replace_callback( $codeSpanPattern, static function ( $matches ) {
-			return $matches[1];
-		}, $content );
-		if ( preg_match( '/<code\s+class="([^"]+)">/', $content, $matches ) ) {
-			$language = $matches[1];
-			$content = preg_replace( '/<code\s+class="([^"]+)">/', '', $content );
-			$content = preg_replace( '/<\/code>$/', '', $content );
-			// need further correspondence of language tags
-			$content = "<syntaxhighlight lang=\"$language\">\n" . $content . "\n</syntaxhighlight>";
-		} elseif ( preg_match( '/<code>/', $content ) ) {
-			$content = preg_replace( '/<code>/', '', $content );
-			$content = preg_replace( '/<code>/', '', $content );
-			$content = "<pre>" . $content . "</pre>";
-		} else {
-			$content = "<pre>" . $content . "</pre>";
-		}
-		$content = str_replace( array_keys( $encodedEntities ), array_values( $encodedEntities ), $content );
-		return $content;
-	}
-
-	/**
 	 * @param string $content
 	 * @return string
 	 */
 	public function postprocess( $content ) {
-		$content = $this->replaceInlineTitles(
+		$content = $this->toolbox->replaceInlineTitles(
 			'attachment:”',
 			'”',
 			'[[',
 			']]',
 			$content
 		);
+		$content = $this->handleHTMLTables( $content );
+		$content = $this->handleImages( $content );
 		return $content;
 	}
 
 	/**
-	 * @param string $oldStart
-	 * @param string $oldEnd
-	 * @param string $newStart
-	 * @param string $newEnd
 	 * @param string $content
 	 * @return string
 	 */
-	public function replaceInlineTitles( $oldStart, $oldEnd, $newStart, $newEnd, $content ) {
-		$lines = explode( "\n", $content );
-		foreach ( $lines as $index => $line ) {
-			$parts = explode( $oldStart, $line );
-			if ( count( $parts ) > 1 ) {
-				$newLine = $parts[0];
-				for ( $i = 1; $i < count( $parts ); $i++ ) {
-					$part = $parts[$i];
-					$pos = strpos( $part, $oldEnd );
-					if ( $pos !== false ) {
-						$title = substr( $part, 0, $pos );
-						$remainder = substr( $part, $pos + strlen( $oldEnd ) );
-						$newLine .= $newStart . $this->getFormattedTitle( $title ) . $newEnd . $remainder;
-					} else {
-						$newLine .= $oldStart . $part;
-					}
+	public function handleHTMLTables( $content ) {
+		$chunks = explode( '<figure class="table">', $content );
+		$result = $chunks[0];
+		if ( count( $chunks ) > 1 ) {
+			for ( $i = 1; $i < count( $chunks ); $i++ ) {
+				$chunk = $chunks[$i];
+				$parts = explode( "</figure>", $chunk, 2 );
+				if ( count( $parts ) === 2 ) {
+					$table = $this->processWithPandoc( $parts[0], 'html', 'mediawiki' );
+					$table = preg_replace( '/\| \*/', "|\n*", $table );
+					$result .= $table . $parts[1];
+				} else {
+					$result .= "<figure>" . $chunk;
 				}
-				$lines[$index] = $newLine;
 			}
 		}
-		return implode( "\n", $lines );
+		$chunks = explode( '<table', $result );
+		$result = $chunks[0];
+		if ( count( $chunks ) > 1 ) {
+			for ( $i = 1; $i < count( $chunks ); $i++ ) {
+				$chunk = $chunks[$i];
+				$parts = explode( ">", $chunk, 2 );
+				if ( count( $parts ) === 2 ) {
+					$pieces = explode( "</table>", $parts[1], 2 );
+					$table = $this->processWithPandoc(
+						"<table" . $parts[0] . ">" . $pieces[0] . "</table>",
+						'html',
+						'mediawiki'
+					);
+					$result .= preg_replace( '/\| \*/', "|\n*", $table );
+					$result .= isset( $pieces[1] ) ? $pieces[1] : '';
+				} else {
+					$result .= "<table" . $chunk;
+				}
+			}
+		}
+		return $result;
 	}
 
 	/**
-	 * @param string $title
+	 * @param string $content
 	 * @return string
 	 */
-	public function getFormattedTitle( $title ) {
-		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
-		$foundKey = array_key_first( array_filter( $wikiPages, static function ( $page ) use ( $title ) {
-			return isset( $page['title'] ) && $page['title'] === $title;
-		} ) );
-		if ( $foundKey !== null ) {
-			return $wikiPages[$foundKey]['formatted_title'];
-		}
-
-		if ( substr( $title, -4 ) === '.png' ) {
-			$baseName = substr( $title, 0, -4 );
-			$foundKey = array_key_first( array_filter( $wikiPages, static function ( $page ) use ( $baseName ) {
-				return isset( $page['title'] ) && strpos( $page['title'], $baseName ) === 0;
-			} ) );
-			if ( $foundKey !== null ) {
-				return $wikiPages[$foundKey]['formatted_title'];
+	public function handleImages( $content ) {
+		$chunks = explode( '<figure class="image', $content );
+		$result = $chunks[0];
+		if ( count( $chunks ) > 1 ) {
+			for ( $i = 1; $i < count( $chunks ); $i++ ) {
+				$chunk = $chunks[$i];
+				$parts = explode( ">", $chunk, 2 );
+				if ( count( $parts ) === 2 ) {
+					$pieces = explode( "</figure>", $parts[1], 2 );
+					// $result .= "<!--<figure" . $parts[0] . ">-->";
+					// $result .= $pieces[0] . "<!--</figure>-->";
+					$result .= $pieces[0];
+					$result .= isset( $pieces[1] ) ? $pieces[1] : '';
+				} else {
+					$result .= "<figure" . $chunk;
+				}
 			}
 		}
-
-		$customizations = $this->dataBuckets->getBucketData( 'customizations' );
-		if ( !isset( $customizations['is-enabled'] ) || $customizations['is-enabled'] !== true ) {
-			print_r( "\nNo customization enabled\n" );
-			$customizations = [];
-			$customizations['is-enabled'] = false;
-		} else {
-			print_r( "\nCustomizations loaded\n" );
-		}
-		if ( isset( $customizations['title-cheatsheet'][$title] ) ) {
-			return $customizations['title-cheatsheet'][$title];
-		}
-
-		$this->output->writeln( "<error>Original title '$title' not found </error>" );
-		return $title;
+		return $result;
 	}
 }
