@@ -38,6 +38,8 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 				$content = $revision['data'];
 				$content = $this->preprocess( $content );
 				// $content = $this->processWithPandoc( $content, 'html', 'textile' );
+				// $content = $this->processWithPandoc( $content, 'textile', 'html' );
+				// $content = $this->processWithPandoc( $content, 'html', 'mediawiki' );
 				$content = $this->processWithPandoc( $content, 'textile', 'mediawiki' );
 				$content = $this->handlePreTags( $content );
 				$result[$version] = $content;
@@ -108,20 +110,20 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	public function handlePreTags( $content ) {
 		$chunks = explode( "<pre>", $content );
 		$chunks[0] = $this->postprocess( $chunks[0] );
-		$result = $chunks[0];
+		$content = $chunks[0];
 		if ( count( $chunks ) > 1 ) {
 			for ( $i = 1; $i < count( $chunks ); $i++ ) {
 				$chunk = $chunks[$i];
 				$parts = explode( "</pre>", $chunk, 2 );
 				if ( count( $parts ) === 2 ) {
-					$result .= $this->toolbox->convertCodeBlocks( $parts[0] );
-					$result .= $this->postprocess( $parts[1] );
+					$content .= $this->toolbox->convertCodeBlocks( $parts[0] );
+					$content .= $this->postprocess( $parts[1] );
 				} else {
-					$result .= "<pre>" . $chunk;
+					$content .= "<pre>" . $chunk;
 				}
 			}
 		}
-		return $result;
+		return $content;
 	}
 
 	/**
@@ -129,6 +131,8 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	 * @return string
 	 */
 	public function postprocess( $content ) {
+		$content = $this->toolbox->replaceEncodedEntities( $content );
+		$content = $this->toolbox->replaceEncodedEntities( $content );
 		$content = $this->toolbox->replaceInlineTitles(
 			'attachment:”',
 			'”',
@@ -138,6 +142,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 		);
 		$content = $this->handleHTMLTables( $content );
 		$content = $this->handleImages( $content );
+		$content = $this->handleAnchors( $content );
 		return $content;
 	}
 
@@ -147,7 +152,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	 */
 	public function handleHTMLTables( $content ) {
 		$chunks = explode( '<figure class="table">', $content );
-		$result = $chunks[0];
+		$content = $chunks[0];
 		if ( count( $chunks ) > 1 ) {
 			for ( $i = 1; $i < count( $chunks ); $i++ ) {
 				$chunk = $chunks[$i];
@@ -155,14 +160,14 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 				if ( count( $parts ) === 2 ) {
 					$table = $this->processWithPandoc( $parts[0], 'html', 'mediawiki' );
 					$table = preg_replace( '/\| \*/', "|\n*", $table );
-					$result .= $table . $parts[1];
+					$content .= $table . $parts[1];
 				} else {
-					$result .= "<figure>" . $chunk;
+					$content .= "<figure>" . $chunk;
 				}
 			}
 		}
-		$chunks = explode( '<table', $result );
-		$result = $chunks[0];
+		$chunks = explode( '<table', $content );
+		$content = $chunks[0];
 		if ( count( $chunks ) > 1 ) {
 			for ( $i = 1; $i < count( $chunks ); $i++ ) {
 				$chunk = $chunks[$i];
@@ -174,14 +179,14 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 						'html',
 						'mediawiki'
 					);
-					$result .= preg_replace( '/\| \*/', "|\n*", $table );
-					$result .= isset( $pieces[1] ) ? $pieces[1] : '';
+					$content .= preg_replace( '/\| \*/', "|\n*", $table );
+					$content .= isset( $pieces[1] ) ? $pieces[1] : '';
 				} else {
-					$result .= "<table" . $chunk;
+					$content .= "<table" . $chunk;
 				}
 			}
 		}
-		return $result;
+		return $content;
 	}
 
 	/**
@@ -190,22 +195,66 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	 */
 	public function handleImages( $content ) {
 		$chunks = explode( '<figure class="image', $content );
-		$result = $chunks[0];
+		$content = $chunks[0];
 		if ( count( $chunks ) > 1 ) {
 			for ( $i = 1; $i < count( $chunks ); $i++ ) {
 				$chunk = $chunks[$i];
 				$parts = explode( ">", $chunk, 2 );
 				if ( count( $parts ) === 2 ) {
 					$pieces = explode( "</figure>", $parts[1], 2 );
-					// $result .= "<!--<figure" . $parts[0] . ">-->";
-					// $result .= $pieces[0] . "<!--</figure>-->";
-					$result .= $pieces[0];
-					$result .= isset( $pieces[1] ) ? $pieces[1] : '';
+					// $content .= "<!--<figure" . $parts[0] . ">-->";
+					// $content .= $pieces[0] . "<!--</figure>-->";
+					$content .= $pieces[0];
+					$content .= isset( $pieces[1] ) ? $pieces[1] : '';
 				} else {
-					$result .= "<figure" . $chunk;
+					$content .= "<figure" . $chunk;
 				}
 			}
 		}
-		return $result;
+		return $content;
+	}
+
+	/**
+	 * @param string $content
+	 * @return string
+	 */
+	public function handleAnchors( $content ) {
+		$chunks = explode( '<a ', $content );
+		$content = $chunks[0];
+		if ( count( $chunks ) > 1 ) {
+			for ( $i = 1; $i < count( $chunks ); $i++ ) {
+				$chunk = $chunks[$i];
+				$parts = explode( '>', $chunk, 2 );
+				$match = preg_match( '/href="([^"]+)"/', $parts[0], $matches );
+				if ( $match ) {
+					$link = $matches[1];
+				} else {
+					$link = "anchor-handle-error";
+					print_r( "\nError occured when handling anchor href in: " . $chunk );
+				}
+				// point to check if the link is a local link: tba
+				if ( count( $parts ) === 2 ) {
+					$pieces = explode( "</a>", $parts[1], 2 );
+					if ( !isset( $pieces[0] ) ) {
+						$text = $link;
+					} else {
+						$text = preg_replace( '/<br \/>/', '', $pieces[0] );
+						$text = preg_replace( '/\n/', '', $text );
+						$text = preg_replace( '/\[\[/', '', $text );
+						$text = preg_replace( '/\]\]/', '', $text );
+						$text = trim( $text );
+						if ( $text === '' ) {
+							$text = $link;
+						}
+					}
+					$content .= "[" . $link . " " . $text . "]";
+					$content .= isset( $pieces[1] ) ? $pieces[1] : '';
+				} else {
+					$content .= "<a" . $chunk;
+					print_r( "\nError occured when handling anchor in: " . $chunk );
+				}
+			}
+		}
+		return $content;
 	}
 }

@@ -240,14 +240,10 @@ class ConvertToolbox {
 	}
 
 	/**
-	 * Converts HTML-encoded code blocks from (Easy)Redmine Textile syntax
-	 * to MediaWiki Wikitext syntax with code highlighting provided by the
-	 * SyntaxHighlight extension.
-	 *
-	 * @param string $content Content inside <pre> tags
+	 * @param string $content
 	 * @return string
 	 */
-	public function convertCodeBlocks( $content ) {
+	public function replaceEncodedEntities( $content ) {
 		$encodedEntities = [
 			'&lt;' => '<',
 			'&gt;' => '>',
@@ -259,6 +255,23 @@ class ConvertToolbox {
 			'&amp;quot;' => '"',
 		];
 		$content = str_replace( array_keys( $encodedEntities ), array_values( $encodedEntities ), $content );
+		$content = preg_replace( '/&amp;([a-z0-9]+);/i', '&$1;', $content );
+		$content = preg_replace( '/&amp;#([0-9]+);/i', '&#$1;', $content );
+		$content = preg_replace( '/&amp;#x([0-9a-f]+);/i', '&#x$1;', $content );
+		$content = preg_replace( '/&amp;([a-z0-9]+)(?=[^a-z0-9])/i', '&$1', $content );
+		return $content;
+	}
+
+	/**
+	 * Converts HTML-encoded code blocks from (Easy)Redmine Textile syntax
+	 * to MediaWiki Wikitext syntax with code highlighting provided by the
+	 * SyntaxHighlight extension.
+	 *
+	 * @param string $content Content inside <pre> tags
+	 * @return string
+	 */
+	public function convertCodeBlocks( $content ) {
+		$content = $this->replaceEncodedEntities( $content );
 		$codeSpanPattern = '/<span\s+class="[a-z0-9]+">(.*?)<\/span>/i';
 		$content = preg_replace_callback( $codeSpanPattern, static function ( $matches ) {
 			return $matches[1];
@@ -276,7 +289,7 @@ class ConvertToolbox {
 		} else {
 			$content = "<pre>" . $content . "</pre>";
 		}
-		$content = str_replace( array_keys( $encodedEntities ), array_values( $encodedEntities ), $content );
+		$content = $this->replaceEncodedEntities( $content );
 		return $content;
 	}
 
