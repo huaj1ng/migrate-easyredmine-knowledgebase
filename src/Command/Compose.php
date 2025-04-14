@@ -32,7 +32,7 @@ class Compose extends SimpleCommand {
 				$this->dest . "/result/$key-output.xml"
 			);
 			if ( $result === false ) {
-				$this->output->writeln( "<error>Converter '$key' failed.</error>" );
+				$this->output->writeln( "<error>Composer '$key' failed.</error>" );
 				return 1;
 			}
 		}

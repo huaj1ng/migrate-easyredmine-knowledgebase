@@ -91,8 +91,6 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 		$this->analyzeRevisions( $connection );
 		$this->analyzeAttachments( $connection );
 		$this->doStatistics( $connection );
-		// add symphony console output
-
 		return true;
 	}
 
@@ -252,9 +250,9 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 */
 	protected function analyzeAttachments( $connection ) {
 		$res = $connection->query(
-			"SELECT id AS attachment_id, container_type, container_id, "
-			. "filename FROM attachments WHERE filename IN ("
-				. "SELECT filename FROM attachments "
+			"SELECT attachment_id, container_type, container_id, filename "
+			. "FROM attachment_versions WHERE filename IN ("
+				. "SELECT filename FROM attachment_versions "
 				. "WHERE container_type IS NOT NULL "
 				. "GROUP BY filename "
 				. "HAVING COUNT(*) >= 2 "
@@ -293,7 +291,6 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 		);
 		foreach ( $res as $row ) {
 			if ( !isset( $wikiPages[$row['container_id']] ) ) {
-				print_r( "Attachment " . $row['filename'] . " skipped\n" );
 				continue;
 			}
 			$pathPrefix = $row['disk_directory']

@@ -108,6 +108,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	 * @return string
 	 */
 	public function handlePreTags( $content ) {
+		$content = $this->toolbox->replaceEncodedEntities( $content );
 		$chunks = explode( "<pre>", $content );
 		$chunks[0] = $this->postprocess( $chunks[0] );
 		$content = $chunks[0];
@@ -123,6 +124,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 				}
 			}
 		}
+		$content = $this->handleHTMLTables( $content );
 		return $content;
 	}
 
@@ -132,7 +134,6 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	 */
 	public function postprocess( $content ) {
 		$content = $this->toolbox->replaceEncodedEntities( $content );
-		$content = $this->toolbox->replaceEncodedEntities( $content );
 		$content = $this->toolbox->replaceInlineTitles(
 			'attachment:”',
 			'”',
@@ -140,9 +141,9 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 			']]',
 			$content
 		);
-		$content = $this->handleHTMLTables( $content );
 		$content = $this->handleImages( $content );
 		$content = $this->handleAnchors( $content );
+		$content = $this->handleEasyStoryLinks( $content );
 		return $content;
 	}
 
@@ -202,12 +203,37 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 				$parts = explode( ">", $chunk, 2 );
 				if ( count( $parts ) === 2 ) {
 					$pieces = explode( "</figure>", $parts[1], 2 );
-					// $content .= "<!--<figure" . $parts[0] . ">-->";
-					// $content .= $pieces[0] . "<!--</figure>-->";
 					$content .= $pieces[0];
 					$content .= isset( $pieces[1] ) ? $pieces[1] : '';
 				} else {
 					$content .= "<figure" . $chunk;
+				}
+			}
+		}
+		$chunks = explode( '<img ', $content );
+		$content = $chunks[0];
+		$customizations = $this->toolbox->getCustomizations();
+		if ( count( $chunks ) > 1 ) {
+			for ( $i = 1; $i < count( $chunks ); $i++ ) {
+				$chunk = $chunks[$i];
+				$parts = explode( ">", $chunk, 2 );
+				if ( count( $parts ) === 2 ) {
+					$match = preg_match( '/src="([^"]+)"/', $parts[0], $matches );
+					$content .= $match === false
+						? "<img" . $chunk
+						: ( strpos( $matches[1], ':/' ) === false
+						? "[[" . $this->toolbox->getFormattedTitle(
+							urldecode( $matches[1] )
+						) . "]]" . $parts[1]
+						: ( !isset( $customizations['redmine-domain'] )
+							|| strpos( $matches[1], $customizations['redmine-domain'] ) === false
+						? "[" . $matches[1] . "]" . $parts[1]
+						: ( $this->getAttachmentTitleFromLink( $matches[1] )
+						? "[[" . $this->getAttachmentTitleFromLink( $matches[1] ) . "]]" . $parts[1]
+						: $matches[1] . "]" . $parts[1]
+						) ) );
+				} else {
+					$content .= "<img" . $chunk;
 				}
 			}
 		}
@@ -256,5 +282,58 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 			}
 		}
 		return $content;
+	}
+
+	/**
+	 * @param string $content
+	 * @return string
+	 */
+	public function handleEasyStoryLinks( $content ) {
+		$domain = $this->toolbox->getDomain();
+		if ( !$domain ) {
+			return $content;
+		}
+		// Pattern 1: [https://example.com/easy_knowledge_stories/123 some text]
+		$content = preg_replace_callback(
+			'/\[https?:\/\/' . $domain . '\/easy_knowledge_stories\/(\d+)(?:\?[^\s\]]*)?(\s+[^\]]+)?\]/i',
+			function ( $matches ) {
+				$id = (int)$matches[1];
+				$text = isset( $matches[2] ) ? ltrim( $matches[2] ) : '';
+				$title = $this->toolbox->getFormattedTitleFromId( $id ) ?? "EKBStory-$id";
+				return $text !== '' ? "[[{$title}|{$text}]]" : "[[{$title}]]";
+			},
+			$content
+		);
+		// Pattern 2: https://example.com/easy_knowledge_stories/123
+		$content = preg_replace_callback(
+			'/(?<![[\w|])https?:\/\/' . $domain . '\/easy_knowledge_stories\/(\d+)(?:\?[^[\s]*)?(?![]\w])/i',
+			function ( $matches ) {
+				$id = (int)$matches[1];
+				$title = $this->toolbox->getFormattedTitleFromId( $id ) ?? "EKBStory-$id";
+				return "[[{$title}]]";
+			},
+			$content
+		);
+		return $content;
+	}
+
+	/**
+	 * @param string $link
+	 * @return string|false
+	 */
+	public function getAttachmentTitleFromLink( $link ) {
+		$domain = $this->toolbox->getDomain();
+		if ( !$domain ) {
+			return false;
+		}
+		$pattern = '/https?:\/\/' . $domain . '\/attachments\/(?:download|thumbnail)\/';
+		$pattern .= '(\d+)(?:\/[^?#\s]*)?(?:\?[^#\s]*)?(?:#[^\s]*)?/';
+		if ( preg_match( $pattern, $link, $matches ) ) {
+			$id = (int)$matches[1];
+			$title = $this->toolbox->getFormattedTitleFromId( $id + 1000000000 ) ?? "Attachment-$id";
+			print_r( "\nAttachment title: " . $title . " for link: " . $link );
+			return $title;
+		}
+		return false;
 	}
 }

@@ -36,6 +36,7 @@ This is a command line tool to convert the contents of a EasyRedmine Knowledgeba
 
 return array (
   'is-enabled' => true,
+  'redmine-domain' => 'your.redmine-instance.com',
   'customized-replace' => 
   array (
     'oldstring' => 'newstring',

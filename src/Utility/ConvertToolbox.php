@@ -199,7 +199,6 @@ class ConvertToolbox {
 	public function __construct( Workspace $workspace ) {
 		$this->dataBuckets = new DataBuckets( [
 			'wiki-pages',
-			'page-revisions',
 			'customizations',
 		] );
 		$this->dataBuckets->loadFromWorkspace( $workspace );
@@ -211,6 +210,26 @@ class ConvertToolbox {
 			$this->customizations = $customizations;
 			print_r( "\nCustomizations loaded\n" );
 		}
+	}
+
+	/**
+	 * @return array
+	 */
+	public function getCustomizations() {
+		return $this->customizations;
+	}
+
+	/**
+	 * @return string|false
+	 */
+	public function getDomain() {
+		$customizations = $this->getCustomizations();
+		if ( !isset( $customizations['redmine-domain'] ) ) {
+			return false;
+		}
+		$domain = rtrim( $customizations['redmine-domain'], '/' );
+		$domain = preg_quote( $domain, '/' );
+		return $domain;
 	}
 
 	/**
@@ -362,7 +381,7 @@ class ConvertToolbox {
 		if ( $foundKey !== null ) {
 			return $wikiPages[$foundKey]['formatted_title'];
 		}
-		if ( substr( $title, -4 ) === '.png' ) {
+		if ( substr( $title, -4 ) === '.png' || substr( $title, -4 ) === '.jpg' || substr( $title, -4 ) === '.gif' ) {
 			$baseName = substr( $title, 0, -4 );
 			$foundKey = array_key_first( array_filter( $wikiPages, static function ( $page ) use ( $baseName ) {
 				return isset( $page['title'] ) && strpos( $page['title'], $baseName ) === 0;
@@ -376,5 +395,17 @@ class ConvertToolbox {
 		}
 		print_r( "\nOriginal title '$title' not found\n" );
 		return $title;
+	}
+
+	/**
+	 * @param int $id
+	 * @return string|null
+	 */
+	public function getFormattedTitleFromId( $id ) {
+		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
+		if ( isset( $wikiPages[$id] ) ) {
+			return $wikiPages[$id]['formatted_title'];
+		}
+		return null;
 	}
 }
