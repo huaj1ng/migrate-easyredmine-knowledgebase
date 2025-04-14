@@ -27,7 +27,7 @@ class EasyRedmineKnowledgebaseExtractor extends SimpleHandler implements IExtrac
 					continue;
 				}
 				$targetPath = $this->workspace->saveUploadFile(
-					$file['target_path'],
+					$file['target_filename'],
 					file_get_contents( $sourcePath )
 				);
 			}

@@ -24,6 +24,7 @@ class Analyze extends SimpleCommand {
 		return [
 			'wiki-pages',
 			'page-revisions',
+			'samename-attachments',
 			'attachment-files',
 		];
 	}

@@ -251,6 +251,32 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzeAttachments( $connection ) {
+		$res = $connection->query(
+			"SELECT id AS attachment_id, container_type, container_id, "
+			. "filename FROM attachments WHERE filename IN ("
+				. "SELECT filename FROM attachments "
+				. "WHERE container_type IS NOT NULL "
+				. "GROUP BY filename "
+				. "HAVING COUNT(*) >= 2 "
+			. ") AND container_type IS NOT NULL "
+			. "ORDER BY filename;"
+		);
+		$samenameAttachments = [];
+		foreach ( $res as $row ) {
+			$filename = $row['filename'];
+			unset( $row['filename'] );
+			$id = $row['attachment_id'];
+			unset( $row['attachment_id'] );
+			$samenameAttachments[$filename][$id] = $row;
+			$this->buckets->addData(
+				'samename-attachments',
+				$filename,
+				$samenameAttachments[$filename],
+				false,
+				false
+			);
+		}
+
 		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
 		$pageRevisions = $this->buckets->getBucketData( 'page-revisions' );
 		$rows = [];
@@ -280,7 +306,12 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				'user_id' => $row['author_id'],
 				'filename' => $row['filename'],
 				'source_path' => $pathPrefix . $row['disk_filename'],
-				'target_path' => $pathPrefix . $row['filename'],
+				'target_filename' => isset( $samenameAttachments[$row['filename']] )
+					? implode(
+						'_',
+						$samenameAttachments[$row['filename']][$row['attachment_id']]
+					) . '_' . $row['filename']
+					: $row['filename'],
 				'quoted_page_id' => $row['container_id'],
 			];
 		}
@@ -296,7 +327,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			$titleBuilder = new TitleBuilder( [] );
 			$fTitle = $titleBuilder
 				->setNamespace( 6 )
-				->appendTitleSegment( $file['filename'] )
+				->appendTitleSegment( $file['target_filename'] )
 				->build();
 			$dummyId = $id + 1000000000;
 			$wikiPages[$dummyId] = [
