@@ -6,7 +6,7 @@ This is a command line tool to convert the contents of a EasyRedmine Knowledgeba
 1. Connection to MySQL database of the Easy Redmine installation you would like to migrate. Alternatively, you should have its complete database dump and load the dump into a MySQL database server/container that you can connect to.
 <!--TODO: specify data tables needed-->
 2. A complete copy of the directory holding all attachment files of your Easy Redmine installation. Alternatively, you should have SSH connection to the server holding the directory (as well as tools like SCP or SSHFS installed, so that you can copy or map the directory).
-3. PHP >= 8.2 with the `xml` extension must be installed
+3. PHP >= 8.1 with the `xml` extension must be installed
 4. `pandoc` >= 3.1.6. The `pandoc` tool must be installed and available in the `PATH` (https://pandoc.org/installing.html).
 
 ## Installation
@@ -47,8 +47,16 @@ return array (
   ),
   'pages-to-modify' => 
   array (
-    'Formatted_page_title_to_delete' => false,
+    'Formatted_page_title_of_unwanted_page' => false,
     'Formatted_page_title_to_alter' => 'Namespace:Altered_root_page/Altered_title',
+  ),
+  'categories-to-add' => 
+  array (
+    'Formatted_page_title' => 
+    array(
+      0 => 'Your category',
+      1 => 'Another category',
+    ),
   ),
 );
 ```

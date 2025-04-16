@@ -7,6 +7,9 @@ use HalloWelt\MediaWiki\Lib\Migration\Workspace;
 
 class ConvertToolbox {
 
+	/** @var Workspace */
+	protected $workspace = null;
+
 	/** @var DataBuckets */
 	protected $dataBuckets = null;
 
@@ -197,11 +200,14 @@ class ConvertToolbox {
 	 * @param Workspace $workspace
 	 */
 	public function __construct( Workspace $workspace ) {
+		$this->workspace = $workspace;
 		$this->dataBuckets = new DataBuckets( [
 			'wiki-pages',
 			'customizations',
+			'missing-titles',
+			'missing-attachments',
 		] );
-		$this->dataBuckets->loadFromWorkspace( $workspace );
+		$this->dataBuckets->loadFromWorkspace( $this->workspace );
 		$customizations = $this->dataBuckets->getBucketData( 'customizations' );
 		if ( !isset( $customizations['is-enabled'] ) || $customizations['is-enabled'] !== true ) {
 			print_r( "\nNo customization enabled\n" );
@@ -210,6 +216,10 @@ class ConvertToolbox {
 			$this->customizations = $customizations;
 			print_r( "\nCustomizations loaded\n" );
 		}
+	}
+
+	public function __destruct() {
+		$this->dataBuckets->saveToWorkspace( $this->workspace );
 	}
 
 	/**
@@ -309,6 +319,7 @@ class ConvertToolbox {
 			$content = "<pre>" . $content . "</pre>";
 		}
 		$content = $this->replaceEncodedEntities( $content );
+		$content = preg_replace( '/<br\s*\/?>/i', "\n", $content );
 		return $content;
 	}
 
@@ -393,7 +404,7 @@ class ConvertToolbox {
 		if ( isset( $this->customizations['title-cheatsheet'][$title] ) ) {
 			return $this->customizations['title-cheatsheet'][$title];
 		}
-		print_r( "\nOriginal title '$title' not found\n" );
+		$this->dataBuckets->addData( 'missing-titles', $title, true, false );
 		return $title;
 	}
 
@@ -407,5 +418,25 @@ class ConvertToolbox {
 			return $wikiPages[$id]['formatted_title'];
 		}
 		return null;
+	}
+
+	/**
+	 * @param string $link
+	 * @return string|false
+	 */
+	public function getAttachmentTitleFromLink( $link ) {
+		$domain = $this->getDomain();
+		if ( !$domain ) {
+			return false;
+		}
+		$pattern = '/https?:\/\/' . $domain . '\/attachments\/(?:download|thumbnail)\/';
+		$pattern .= '(\d+)(?:\/[^?#\s]*)?(?:\?[^#\s]*)?(?:#[^\s]*)?/';
+		if ( preg_match( $pattern, $link, $matches ) ) {
+			$id = (int)$matches[1];
+			$title = $this->getFormattedTitleFromId( $id + 1000000000 ) ?? "Attachment-$id";
+			$this->dataBuckets->addData( 'missing-attachments', $link, true, false );
+			return $title;
+		}
+		return false;
 	}
 }

@@ -24,14 +24,13 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	public function convert(): bool {
 		$this->toolbox = new ConvertToolbox( $this->workspace );
 		$wikiPages = $this->dataBuckets->getBucketData( 'wiki-pages' );
-		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
-
 		$totalPages = count( $wikiPages );
 		$output = new ConsoleOutput();
 		$progressBar = new ProgressBar( $output, $totalPages );
 		$progressBar->setFormat( ' %current%/%max% [%bar%] %percent:3s%% %elapsed:6s%/%estimated:-6s% %memory:6s%' );
 		$progressBar->start();
 
+		$pageRevisions = $this->dataBuckets->getBucketData( 'page-revisions' );
 		foreach ( $wikiPages as $id => $page ) {
 			$result = [];
 			foreach ( $pageRevisions[$id] as $version => $revision ) {
@@ -71,7 +70,7 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 	 */
 	public function processWithPandoc( $content, $source, $target ) {
 		$process = proc_open(
-			"pandoc --from $source --to $target",
+			"timeout 60 pandoc --from $source --to $target",
 			[
 				0 => [ 'pipe', 'r' ],
 				1 => [ 'pipe', 'w' ],
@@ -86,21 +85,47 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 			);
 			return $content;
 		}
+		stream_set_blocking( $pipes[1], 0 );
+		stream_set_blocking( $pipes[2], 0 );
 		fwrite( $pipes[0], $content );
 		fclose( $pipes[0] );
-		$converted = stream_get_contents( $pipes[1] );
+
+		$converted = '';
+		$errors = '';
+		$startTime = time();
+		$timeout = 60;
+		while ( time() - $startTime < $timeout ) {
+			$converted .= stream_get_contents( $pipes[1] );
+			$errors .= stream_get_contents( $pipes[2] );
+
+			$status = proc_get_status( $process );
+			if ( !$status['running'] ) {
+				break;
+			}
+			usleep( 10000 );
+		}
+		$status = proc_get_status( $process );
+		if ( $status['running'] ) {
+			proc_terminate( $process, 9 );
+			$this->output->writeln(
+				"<error>Pandoc process timed out after $timeout seconds, content length: "
+				. strlen( $content ) . " chars</error>"
+			);
+			print_r( $content );
+			fclose( $pipes[1] );
+			fclose( $pipes[2] );
+			return "<!-- CONVERSION TIMEOUT: REQUIRES MANUAL REVIEW -->\n" . $content;
+		}
 		fclose( $pipes[1] );
-		$errors = stream_get_contents( $pipes[2] );
 		fclose( $pipes[2] );
 		$exitCode = proc_close( $process );
-		if ( $exitCode !== 0 ) {
+		if ( $exitCode !== 0 && $exitCode !== null ) {
 			$this->output->writeln(
-				"<error>Pandoc conversion failed with exit code $exitCode: $errors, "
-				. "textileToMediaWiki conversion skipped </error>"
+				"<error>Conversion skipped: Pandoc failed with exit code $exitCode: $errors</error>"
 			);
 			return $content;
 		}
-		return $converted;
+		return $converted ?: $content;
 	}
 
 	/**
@@ -228,8 +253,8 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 						: ( !isset( $customizations['redmine-domain'] )
 							|| strpos( $matches[1], $customizations['redmine-domain'] ) === false
 						? "[" . $matches[1] . "]" . $parts[1]
-						: ( $this->getAttachmentTitleFromLink( $matches[1] )
-						? "[[" . $this->getAttachmentTitleFromLink( $matches[1] ) . "]]" . $parts[1]
+						: ( $this->toolbox->getAttachmentTitleFromLink( $matches[1] )
+						? "[[" . $this->toolbox->getAttachmentTitleFromLink( $matches[1] ) . "]]" . $parts[1]
 						: $matches[1] . "]" . $parts[1]
 						) ) );
 				} else {
@@ -315,25 +340,5 @@ class EasyRedmineKnowledgebaseConverter extends SimpleHandler {
 			$content
 		);
 		return $content;
-	}
-
-	/**
-	 * @param string $link
-	 * @return string|false
-	 */
-	public function getAttachmentTitleFromLink( $link ) {
-		$domain = $this->toolbox->getDomain();
-		if ( !$domain ) {
-			return false;
-		}
-		$pattern = '/https?:\/\/' . $domain . '\/attachments\/(?:download|thumbnail)\/';
-		$pattern .= '(\d+)(?:\/[^?#\s]*)?(?:\?[^#\s]*)?(?:#[^\s]*)?/';
-		if ( preg_match( $pattern, $link, $matches ) ) {
-			$id = (int)$matches[1];
-			$title = $this->toolbox->getFormattedTitleFromId( $id + 1000000000 ) ?? "Attachment-$id";
-			print_r( "\nAttachment title: " . $title . " for link: " . $link );
-			return $title;
-		}
-		return false;
 	}
 }

@@ -127,7 +127,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			// naming convention: Category:<root_cat>/<sub_cat>/..
 			$rows[$page_id]['formatted_title'] = $builder->invertTitleSegments()->build();
 			$rows[$page_id]['version'] = 1;
-			$message = '<!--EKB-Stories-Migration: generated revision from easy_knowledge_categories table-->';
+			$rows[$page_id]['categories'] = [];
 			$dummyId = $page_id + self::EKB_CAT_OFFSET;
 			$pageRevision[1] = [
 				'rev_id' => $dummyId,
@@ -137,7 +137,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				'comments' => '',
 				'updated_on' => $rows[$page_id]['updated_on'],
 				'parent_rev_id' => null,
-				'data' => $rows[$page_id]['data'] . $message,
+				'data' => $rows[$page_id]['data'],
 			];
 			unset( $rows[$page_id]['data'] );
 			unset( $rows[$page_id]['author_id'] );
@@ -193,6 +193,12 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			$rows[$page_id]['parent_id'] = null;
 
 			$fTitle = $rows[$page_id]['formatted_title'];
+			if ( $customizations['is-enabled'] && isset( $customizations['categories-to-add'][$fTitle] ) ) {
+				$rows[$page_id]['categories'] = array_unique( array_merge(
+					$rows[$page_id]['categories'],
+					$customizations['categories-to-add'][$fTitle]
+				) );
+			}
 			if ( $customizations['is-enabled'] && isset( $customizations['pages-to-modify'][$fTitle] ) ) {
 				if ( $customizations['pages-to-modify'][$fTitle] === false ) {
 					continue;
@@ -235,6 +241,14 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				$last_ver = $ver;
 				$rows[$ver]['author_name'] = $this->getUserName( $row['author_id'] );
 				$rows[$ver]['comments'] = '';
+				if (
+					is_array( $wikiPages[$page_id]['categories'] )
+					&& count( $wikiPages[$page_id]['categories'] ) > 0
+				) {
+					$rows[$ver]['data'] .= "\n[[Category:"
+						. implode( "]]\n[[Category:", $wikiPages[$page_id]['categories'] )
+						. "]]";
+				}
 			}
 			if ( count( $rows ) !== 0 ) {
 				$this->buckets->addData( 'page-revisions', $page_id, $rows, false, false );
@@ -332,6 +346,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				'version' => 1,
 				'formatted_title' => $fTitle,
 				'parent_id' => null,
+				'categories' => [],
 			];
 			$pageRevision = [
 				1 => [
