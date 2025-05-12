@@ -37,6 +37,7 @@ This is a command line tool to convert the contents of a EasyRedmine Knowledgeba
 return array (
   'is-enabled' => true,
   'redmine-domain' => 'your.redmine-instance.com',
+  'unwanted-projects' => '1, 2, 3',
   'customized-replace' => 
   array (
     'oldstring' => 'newstring',
@@ -71,6 +72,38 @@ Run the migration commands:
 2. Go to your MediaWiki installation directory.
 3. Make sure that your MediaWiki installation support the file extensions you are about to import: setup [$wgFileExtensions](https://www.mediawiki.org/wiki/Manual:$wgFileExtensions) properly. ~~See `workspace/result/images` for reference.~~
 4. Use `php maintenance/importDump.php /tmp/result/0-output.xml` to import the actual pages
-5. Use `php maintenance/importImages.php /tmp/result/images/` to first import all attachment files and images
+5. To allow all existing attachments, you will need to set the following lines in your `LocalSettings.php` before the next step. ***Note that these lines disable important security features of MediaWiki, which is especially dangerous for websites on the Internet. You should remove the lines immediately after the import.***
+```php
+$wgVerifyMimeType = false;
+$$wgDisableUploadScriptChecks = true;
+$wgStrictFileExtensions = false;
+$wgProhibitedFileExtensions = [];
+```
+6. Use `php maintenance/importImages.php /tmp/result/images/` to first import all attachment files and images
+7. Remove the settings bypassing security features, if you have added any
+8. Refresh MediaWiki indexes:
+```sh
+php maintenance/rebuildrecentchanges.php
+php maintenance/initSiteStats.php
+
+```
+For users of BlueSpice, please also consider the search index when refreshing:
+```sh
+php maintenance/rebuildrecentchanges.php
+php maintenance/initSiteStats.php
+php extensions/BlueSpiceExtendedSearch/maintenance/purgeIndexes.php --quick
+php extensions/BlueSpiceExtendedSearch/maintenance/initBackends.php --quick
+php extensions/BlueSpiceExtendedSearch/maintenance/rebuildIndex.php --quick
+while  [ "$(php maintenance/showJobs.php)" != "0" ]; do php maintenance/runJobs.php --maxjobs 100; done
+```
 
 You may need to update your MediaWiki search index afterwards.
+
+## troubleshooting
+1. To run this migration scirpt, you can either use a seperate MySQL service (e.g within a docker container) that has imported a database dump of your Redmine, or  the actual database you use for your Redmine installation.
+2. The database connection is eventually handled with php mysqli. Hence to test connections, you can run `php -r '$c=mysqli_connect("[your_server_address]","[your_db_user]","[your_db_password]","[your_redmine_db_name]",3306,null);if(!$c)die("Fail");$r=mysqli_query($c,"SHOW TABLES;");while($row=mysqli_fetch_array($r))echo $row[0]."\n";mysqli_close($c);'`. If the connection is correct, you should be able to see all tables in your redmine database. 
+3. Check the port and socket if your connection fails, whether they are correct correct and accessible. A connection to a remote/containered/virtualized database servers should use `null` as the socket, and probably server ip address as hostname. 
+4. If you have ssh connection to the server holding the attachment files, you can consider installing SSHFS and mapping the remote directory to the files directory you created, instead of copying the whole bulky directory. Typically the wiki part of a Redmine installation only involve a small part of the attachments, as most of them appear only in the ticket system. After installing SSHFS, please use the following command to map, and unmount with `fusermount -u /tmp/workspace/files` afterwards (unmount command on MacOS might differ).
+```sh
+sshfs [username]@[server_address]:/[server-path-to]/files /tmp/workspace/files
+```

@@ -26,6 +26,7 @@ class Analyze extends SimpleCommand {
 			'page-revisions',
 			'samename-attachments',
 			'attachment-files',
+			'diagram-contents',
 		];
 	}
 

@@ -8,6 +8,7 @@ use HalloWelt\MediaWiki\Lib\Migration\IAnalyzer;
 use HalloWelt\MediaWiki\Lib\Migration\IOutputAwareInterface;
 use HalloWelt\MediaWiki\Lib\Migration\SqlConnection;
 use HalloWelt\MediaWiki\Lib\Migration\TitleBuilder;
+use HalloWelt\MediaWiki\Lib\Migration\Workspace;
 use SplFileInfo;
 use Symfony\Component\Console\Output\Output;
 
@@ -22,7 +23,19 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	private $customBuckets = null;
 
 	/** @var array */
+	private $customizations = [];
+
+	/** @var array */
 	private $userNames = [];
+
+	/** @var array */
+	private $diagramIds = [];
+
+	/** @var array */
+	private $wantedAttachmentRevisions = [];
+
+	/** @var array */
+	private $wantedAttachmentIds = [];
 
 	/** @var int */
 	private $maintenanceUserID = 1;
@@ -32,17 +45,35 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	private const EKB_CAT_OFFSET = 1500000000;
 
 	/**
-	 * @param Output $output
+	 *
+	 * @param array $config
+	 * @param Workspace $workspace
+	 * @param DataBuckets $buckets
 	 */
-	public function setOutput( Output $output ) {
-		$this->output = $output;
-	}
-
-	protected function setCustomBuckets() {
+	public function __construct( $config, Workspace $workspace, DataBuckets $buckets ) {
+		$this->config = $config;
+		$this->workspace = $workspace;
+		$this->buckets = $buckets;
 		$this->customBuckets = new DataBuckets( [
 			'customizations',
 		] );
 		$this->customBuckets->loadFromWorkspace( $this->workspace );
+		$customizations = $this->customBuckets->getBucketData( 'customizations' );
+		if ( !isset( $customizations['is-enabled'] ) || $customizations['is-enabled'] !== true ) {
+			print_r( "No customization enabled\n" );
+			$customizations = [];
+			$customizations['is-enabled'] = false;
+		} else {
+			print_r( "Customizations loaded\n" );
+		}
+		$this->customizations = $customizations;
+	}
+
+	/**
+	 * @param Output $output
+	 */
+	public function setOutput( Output $output ) {
+		$this->output = $output;
 	}
 
 	/**
@@ -83,12 +114,12 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			print_r( "Please use a connection.json!" );
 			return true;
 		}
-		$this->setCustomBuckets();
 		$connection = new SqlConnection( $file );
 		$this->setNames( $connection );
 		$this->analyzeCategories( $connection );
 		$this->analyzePages( $connection );
 		$this->analyzeRevisions( $connection );
+		$this->analyzeDiagrams( $connection );
 		$this->analyzeAttachments( $connection );
 		$this->doStatistics( $connection );
 		return true;
@@ -153,15 +184,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzePages( $connection ) {
-		$customizations = $this->customBuckets->getBucketData( 'customizations' );
-		if ( !isset( $customizations['is-enabled'] ) || $customizations['is-enabled'] !== true ) {
-			print_r( "No customization enabled\n" );
-			$customizations = [];
-			$customizations['is-enabled'] = false;
-		} else {
-			print_r( "Customizations loaded\n" );
-		}
-
+		$customizations = $this->customizations;
 		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
 		$res = $connection->query(
 			"SELECT s.id AS page_id, s.name AS title, s.version "
@@ -217,6 +240,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 	 * @param SqlConnection $connection
 	 */
 	protected function analyzeRevisions( $connection ) {
+		$customizations = $this->customizations;
 		$wikiPages = $this->buckets->getBucketData( 'wiki-pages' );
 		foreach ( array_keys( $wikiPages ) as $page_id ) {
 			$res = $connection->query(
@@ -233,6 +257,11 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			$last_ver = null;
 			foreach ( $res as $row ) {
 				$ver = $row['version'];
+				if ( $customizations['is-enabled'] && $customizations['current-revision-only'] ) {
+					if ( $ver != $wikiPages[$page_id]['version'] ) {
+						continue;
+					}
+				}
 				$rows[$ver] = $row;
 				unset( $rows[$ver]['version'] );
 				$rows[$ver]['parent_rev_id'] = ( $last_ver !== null ) ?
@@ -241,6 +270,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				$last_ver = $ver;
 				$rows[$ver]['author_name'] = $this->getUserName( $row['author_id'] );
 				$rows[$ver]['comments'] = '';
+				$this->scanData( $rows[$ver]['data'] );
 				if (
 					is_array( $wikiPages[$page_id]['categories'] )
 					&& count( $wikiPages[$page_id]['categories'] ) > 0
@@ -253,6 +283,71 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			if ( count( $rows ) !== 0 ) {
 				$this->buckets->addData( 'page-revisions', $page_id, $rows, false, false );
 			}
+		}
+	}
+
+	/**
+	 * Scan and ananlyze revision text data
+	 *
+	 * @param string $data
+	 * @return void
+	 */
+	protected function scanData( $data ) {
+		preg_match_all( '/{{include_diagram\((\d+)(?:--.+?)\)}}/', $data, $matches );
+		if ( !empty( $matches[1] ) ) {
+			$this->diagramIds = array_unique( array_merge( $this->diagramIds, $matches[1] ) );
+		}
+		$customizations = $this->customizations;
+		if ( $customizations['is-enabled'] && isset( $customizations['redmine-domain'] ) ) {
+			$domain = $customizations['redmine-domain'];
+			$pattern = '/https?:\/\/' . preg_quote( $domain, '/' ) . '\/attachments\/';
+			$pattern .= '(?:(?:download|thumbnail)\/)?';
+			$pattern .= '(\d+)';
+			$pattern .= '([^"\'\s>\xa0]*)/u';
+			preg_match_all( $pattern, $data, $matches, PREG_SET_ORDER );
+			foreach ( $matches as $match ) {
+				if ( !isset( $match[1] ) ) {
+					continue;
+				}
+				$attachmentId = (int)$match[1];
+				$urlSuffix = isset( $match[2] ) ? $match[2] : '';
+				$isVersionSpecific = strpos( $urlSuffix, 'version=true' ) !== false;
+				if ( $isVersionSpecific ) {
+					$this->wantedAttachmentRevisions[] = $attachmentId;
+				} else {
+					$this->wantedAttachmentIds[] = $attachmentId;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Analyze current version of diagrams
+	 *
+	 * @param SqlConnection $connection
+	 */
+	protected function analyzeDiagrams( $connection ) {
+		if ( count( $this->diagramIds ) === 0 ) {
+			return;
+		}
+		$res = $connection->query(
+			"SELECT d.id , d.title, d.current_position, d.project_id, "
+			. "d.author_id, d.updated_at, d.html, d.xml_png FROM diagrams d "
+			. "where d.id IN (" . implode( ", ", $this->diagramIds ) . ");"
+		);
+		foreach ( $res as $row ) {
+			$id = $row['id'];
+			unset( $row['id'] );
+			$targetFilename = "Diagram" . $id . "--" . $row['title'] . '.png';
+			$row['target_filename'] = $targetFilename;
+			$titleBuilder = new TitleBuilder( [] );
+			$row['formatted_title'] = $titleBuilder
+				->setNamespace( 6 )
+				->appendTitleSegment( $targetFilename )
+				->build();
+			$row['data_base64'] = str_replace( 'data:image/png;base64,', '', $row['xml_png'] );
+			unset( $row['xml_png'] );
+			$this->buckets->addData( 'diagram-contents', $id, $row, false, false );
 		}
 	}
 
@@ -311,6 +406,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				? $row['disk_directory'] . DIRECTORY_SEPARATOR
 				: '';
 			$rows[$row['attachment_id']][$row['version']] = [
+				'revision_id' => $row['revision_id'],
 				'created_on' => $row['created_on'],
 				'updated_at' => $row['updated_at'],
 				'summary' => $row['description'],
@@ -325,6 +421,75 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 					: $row['filename'],
 				'quoted_page_id' => $row['container_id'],
 			];
+		}
+		// Include attachments from static links
+		print_r( $this->wantedAttachmentRevisions );
+		if ( count( $this->wantedAttachmentRevisions ) > 0 ) {
+			$wantedAttachments = $this->wantedAttachmentRevisions;
+			$res = $connection->query(
+				"SELECT u.attachment_id, u.id AS revision_id, "
+				. "u.version, u.author_id, u.created_on, u.updated_at, "
+				. "u.description, u.filename, u.disk_directory, u.disk_filename, "
+				. "u.content_type, u.filesize, u.digest, u.container_id "
+				. "FROM attachment_versions u "
+				. "WHERE u.id IN "
+				. "(" . implode( ", ", $wantedAttachments ) . "); "
+			);
+			foreach ( $res as $row ) {
+				$pathPrefix = $row['disk_directory']
+					? $row['disk_directory'] . DIRECTORY_SEPARATOR
+					: '';
+				$rows[$row['attachment_id']][$row['version']] = [
+					'revision_id' => $row['revision_id'],
+					'created_on' => $row['created_on'],
+					'updated_at' => $row['updated_at'],
+					'summary' => $row['description'],
+					'user_id' => $row['author_id'],
+					'filename' => $row['filename'],
+					'source_path' => $pathPrefix . $row['disk_filename'],
+					'target_filename' => isset( $samenameAttachments[$row['filename']] )
+						? implode(
+							'_',
+							$samenameAttachments[$row['filename']][$row['attachment_id']]
+						) . '_' . $row['filename']
+						: $row['filename'],
+					'quoted_content_id' => $row['container_id'],
+				];
+			}
+		}
+		print_r( $this->wantedAttachmentIds );
+		if ( count( $this->wantedAttachmentIds ) > 0 ) {
+			$wantedAttachments = $this->wantedAttachmentIds;
+			$res = $connection->query(
+				"SELECT u.attachment_id, u.id AS revision_id, "
+				. "u.version, u.author_id, u.created_on, u.updated_at, "
+				. "u.description, u.filename, u.disk_directory, u.disk_filename, "
+				. "u.content_type, u.filesize, u.digest, u.container_id "
+				. "FROM attachment_versions u "
+				. "WHERE u.attachment_id IN "
+				. "(" . implode( ", ", $wantedAttachments ) . "); "
+			);
+			foreach ( $res as $row ) {
+				$pathPrefix = $row['disk_directory']
+					? $row['disk_directory'] . DIRECTORY_SEPARATOR
+					: '';
+				$rows[$row['attachment_id']][$row['version']] = [
+					'revision_id' => $row['revision_id'],
+					'created_on' => $row['created_on'],
+					'updated_at' => $row['updated_at'],
+					'summary' => $row['description'],
+					'user_id' => $row['author_id'],
+					'filename' => $row['filename'],
+					'source_path' => $pathPrefix . $row['disk_filename'],
+					'target_filename' => isset( $samenameAttachments[$row['filename']] )
+						? implode(
+							'_',
+							$samenameAttachments[$row['filename']][$row['attachment_id']]
+						) . '_' . $row['filename']
+						: $row['filename'],
+					'quoted_content_id' => $row['container_id'],
+				];
+			}
 		}
 		// generate a dummy page with a dummy revision for each attachment
 		// the only important thing is the title
@@ -342,6 +507,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				->build();
 			$dummyId = $id + 1000000000;
 			$wikiPages[$dummyId] = [
+				'attachment_revision_id' => $file['revision_id'],
 				'title' => $file['filename'],
 				'version' => 1,
 				'formatted_title' => $fTitle,
@@ -350,7 +516,7 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			];
 			$pageRevision = [
 				1 => [
-					'rev_id' => $dummyId,
+					'rev_id' => $file['revision_id'],
 					'page_id' => $dummyId,
 					'author_name' => $this->getUserName( $file['user_id'] ),
 					'author_id' => $file['user_id'],

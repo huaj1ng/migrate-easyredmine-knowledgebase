@@ -11,6 +11,7 @@ class EasyRedmineKnowledgebaseExtractor extends SimpleHandler implements IExtrac
 	/** @var array */
 	protected $dataBucketList = [
 		'attachment-files',
+		'diagram-contents',
 	];
 
 	/**
@@ -19,16 +20,27 @@ class EasyRedmineKnowledgebaseExtractor extends SimpleHandler implements IExtrac
 	 */
 	public function extract( SplFileInfo $sourceDir ): bool {
 		$attachments = $this->dataBuckets->getBucketData( 'attachment-files' );
-		foreach ( $attachments as $attachment ) {
-			foreach ( $attachment as $file ) {
-				$sourcePath = $sourceDir->getPathname() . '/' . $file['source_path'];
-				if ( !is_file( $sourcePath ) ) {
-					print_r( "File not found: " . $sourcePath . "\n" );
-					continue;
+		if ( is_array( $attachments ) ) {
+			foreach ( $attachments as $attachment ) {
+				foreach ( $attachment as $file ) {
+					$sourcePath = $sourceDir->getPathname() . '/' . $file['source_path'];
+					if ( !is_file( $sourcePath ) ) {
+						print_r( "File not found: " . $sourcePath . "\n" );
+						continue;
+					}
+					$targetPath = $this->workspace->saveUploadFile(
+						$file['target_filename'],
+						file_get_contents( $sourcePath )
+					);
 				}
+			}
+		}
+		$diagrams = $this->dataBuckets->getBucketData( 'diagram-contents' );
+		if ( is_array( $diagrams ) ) {
+			foreach ( $diagrams as $diagram ) {
 				$targetPath = $this->workspace->saveUploadFile(
-					$file['target_filename'],
-					file_get_contents( $sourcePath )
+					$diagram['target_filename'],
+					base64_decode( $diagram['data_base64'] )
 				);
 			}
 		}
