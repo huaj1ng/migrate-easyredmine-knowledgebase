@@ -205,6 +205,8 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			foreach ( $res as $row ) {
 				$id = $row['category_id'] + self::EKB_CAT_OFFSET;
 				$category = $wikiPages[$id]['formatted_title'];
+				$category = str_replace( 'Category:', '', $category );
+				$category = str_replace( '_', ' ', $category );
 				$rows[$page_id]['categories'][] = $category;
 			}
 			$titleBuilder = new TitleBuilder( [] );
@@ -423,6 +425,9 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 			];
 		}
 		// Include attachments from static links
+		$this->wantedAttachmentRevisions = array_values(
+			array_unique( $this->wantedAttachmentRevisions )
+		);
 		print_r( $this->wantedAttachmentRevisions );
 		if ( count( $this->wantedAttachmentRevisions ) > 0 ) {
 			$wantedAttachments = $this->wantedAttachmentRevisions;
@@ -457,6 +462,9 @@ class EasyRedmineKnowledgebaseAnalyzer extends SqlBase implements
 				];
 			}
 		}
+		$this->wantedAttachmentIds = array_values(
+			array_unique( $this->wantedAttachmentIds )
+		);
 		print_r( $this->wantedAttachmentIds );
 		if ( count( $this->wantedAttachmentIds ) > 0 ) {
 			$wantedAttachments = $this->wantedAttachmentIds;
